@@ -56,6 +56,7 @@ pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError
         parity_scale_codec::Encode::encode_to(&approver.0.0, &mut enc);
     }
     parity_scale_codec::Encode::encode_to(&prop.minApprovers.as_le_bytes(), &mut enc);
+    parity_scale_codec::Encode::encode_to(&(prop.callLen, prop.enactmentDelay), &mut enc);
 
     Ok(keccak256(&enc).0)
 }

@@ -40,6 +40,8 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
     fund(&ALICE, ENDOWMENT);
     let expected_proposal = Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
+        callLen: 42,
+        enactmentDelay: 100,
         creator: Address::from(ALICE_ADDR.0),
         approvers: vec![Address::from(BOB_ADDR.0)],
         minApprovers: contract::U256::from(1u64),
@@ -57,6 +59,8 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
     let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), contract.addr)
         .data(Contract::proposeCall {
             callHash: B256::repeat_byte(0xAA),
+            callLen: 42,
+            enactmentDelay: 100,
             approvers: vec![Address::from(BOB_ADDR.0)],
             minApprovers: contract::U256::from(1u64),
         }.abi_encode())
@@ -110,6 +114,8 @@ fn proposing_twice_errors() {
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
             .data(Contract::proposeCall {
                 callHash: B256::repeat_byte(0xAA),
+                callLen: 42,
+                enactmentDelay: 100,
                 approvers: vec![Address::from(BOB_ADDR.0)],
                 minApprovers: contract::U256::from(1u64),
             }.abi_encode())

@@ -49,11 +49,6 @@ pub mod referendum {
 
     // --- Placeholders (see the module-level warning) ------------------------
 
-    /// TODO(placeholder): the preimage length is not stored on the proposal yet.
-    /// `Bounded::Lookup` requires the exact encoded length of the preimage.
-    const PLACEHOLDER_PREIMAGE_LEN: u32 = 0;
-    /// TODO(placeholder): enactment delay, in blocks, after the referendum passes.
-    const ENACTMENT_DELAY_BLOCKS: u32 = 0;
     /// TODO(placeholder): fallback weight for the inner `submit` call.
     const FALLBACK_REF_TIME: u64 = 2_000_000_000;
     const FALLBACK_PROOF_SIZE: u64 = 200_000;
@@ -64,7 +59,16 @@ pub mod referendum {
 
     /// SCALE-encode `RuntimeCall::Referenda(submit { .. })` referencing `call_hash`
     /// as a preimage lookup.
-    pub fn encode_submit_call(call_hash: &[u8; 32]) -> Vec<u8> {
+    ///
+    /// `preimage_len` is the encoded byte length of the preimage `call_hash`
+    /// points at (`Bounded::Lookup { hash, len }`), and `enactment_delay` is the
+    /// number of blocks to wait after the referendum passes
+    /// (`DispatchTime::After(enactment_delay)`). Both come from the proposal.
+    pub fn encode_submit_call(
+        call_hash: &[u8; 32],
+        preimage_len: u32,
+        enactment_delay: u32,
+    ) -> Vec<u8> {
         let mut call = Vec::new();
         call.push(REFERENDA_PALLET_INDEX);
         call.push(REFERENDA_SUBMIT_CALL_INDEX);
@@ -78,11 +82,11 @@ pub mod referendum {
         // proposal: Bounded::Lookup { hash, len } (variant index 2).
         call.push(0x02);
         call.extend_from_slice(call_hash);
-        call.extend_from_slice(&PLACEHOLDER_PREIMAGE_LEN.to_le_bytes());
+        call.extend_from_slice(&preimage_len.to_le_bytes());
 
         // enactment_moment: DispatchTime::After(n) (variant index 1).
         call.push(0x01);
-        call.extend_from_slice(&ENACTMENT_DELAY_BLOCKS.to_le_bytes());
+        call.extend_from_slice(&enactment_delay.to_le_bytes());
 
         call
     }
@@ -111,9 +115,13 @@ pub mod referendum {
     }
 
     /// Build the full `IXcm.execute` calldata for finalizing `call_hash` into a
-    /// referendum.
-    pub fn build_execute_calldata(call_hash: &[u8; 32]) -> Vec<u8> {
-        let call = encode_submit_call(call_hash);
+    /// referendum. See [`encode_submit_call`] for `preimage_len`/`enactment_delay`.
+    pub fn build_execute_calldata(
+        call_hash: &[u8; 32],
+        preimage_len: u32,
+        enactment_delay: u32,
+    ) -> Vec<u8> {
+        let call = encode_submit_call(call_hash, preimage_len, enactment_delay);
         let message = encode_xcm_transact(&call);
 
         IXcm::executeCall {

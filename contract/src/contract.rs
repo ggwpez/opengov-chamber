@@ -35,6 +35,8 @@ pub extern "C" fn call() {
                 .expect("Failed to decode propose call");
             let prop = Contract::Proposal {
                 callHash: call.callHash,
+                callLen: call.callLen,
+                enactmentDelay: call.enactmentDelay,
                 creator: get_caller(),
                 approvers: call.approvers,
                 minApprovers: call.minApprovers,
@@ -99,7 +101,11 @@ pub extern "C" fn call() {
             // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
             // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
             // under this contract's signed origin.
-            let input = xcm::referendum::build_execute_calldata(&proposal.callHash.0);
+            let input = xcm::referendum::build_execute_calldata(
+                &proposal.callHash.0,
+                proposal.callLen,
+                proposal.enactmentDelay,
+            );
             let dispatched = api::call(
                 CallFlags::empty(),
                 &xcm::XCM_PRECOMPILE_ADDR,

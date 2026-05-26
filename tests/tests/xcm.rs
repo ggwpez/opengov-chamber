@@ -17,10 +17,11 @@ use frame_support::traits::{Bounded, schedule::DispatchTime};
 use sp_core::H256;
 use xcm::{VersionedXcm, v5::prelude::*};
 
-/// The same placeholder values the contract bakes in (`xcm.rs`). Kept here so the
-/// expected runtime call is byte-identical to what `encode_submit_call` builds.
-const PREIMAGE_LEN: u32 = 0;
-const ENACTMENT_DELAY: u32 = 0;
+/// Sample preimage length / enactment delay, threaded through both the contract
+/// helper and the real runtime call so the expected encoding is byte-identical.
+/// Non-zero on purpose, so the test would catch either value being dropped.
+const PREIMAGE_LEN: u32 = 42;
+const ENACTMENT_DELAY: u32 = 100;
 
 /// Build the *real* `RuntimeCall::Referenda(submit { .. })` the contract intends
 /// to dispatch, using Asset Hub's own types.
@@ -43,7 +44,7 @@ fn expected_submit_call(call_hash: H256) -> RuntimeCall {
 fn encode_submit_call_matches_runtime() {
     let call_hash = [0xAA; 32];
 
-    let from_contract = referendum::encode_submit_call(&call_hash);
+    let from_contract = referendum::encode_submit_call(&call_hash, PREIMAGE_LEN, ENACTMENT_DELAY);
     let from_runtime = expected_submit_call(H256::from(call_hash)).encode();
 
     assert_eq!(
@@ -58,7 +59,7 @@ fn execute_calldata_wraps_submit_call_in_transact() {
     let call_hash = [0xAA; 32];
 
     // Decode the `IXcm.execute(message, weight)` calldata the contract dispatches.
-    let calldata = referendum::build_execute_calldata(&call_hash);
+    let calldata = referendum::build_execute_calldata(&call_hash, PREIMAGE_LEN, ENACTMENT_DELAY);
     let decoded = IXcm::executeCall::abi_decode_validate(&calldata)
         .expect("build_execute_calldata must produce valid IXcm.execute calldata");
 

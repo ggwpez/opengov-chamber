@@ -3,6 +3,8 @@ use contract::{Address, B256, Contract, ProposalError, U256, proposal_key};
 fn base() -> Contract::Proposal {
     Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
+        callLen: 42,
+        enactmentDelay: 100,
         creator: Address::repeat_byte(0x11),
         approvers: vec![Address::repeat_byte(0x22), Address::repeat_byte(0x33)],
         minApprovers: U256::from(2u64),
@@ -46,6 +48,14 @@ fn proposal_key_changes_when_any_field_changes() {
     let mut p = base();
     p.minApprovers = U256::from(1u64);
     assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with minApprovers");
+
+    let mut p = base();
+    p.callLen += 1;
+    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with callLen");
+
+    let mut p = base();
+    p.enactmentDelay += 1;
+    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with enactmentDelay");
 }
 
 #[test]
@@ -113,6 +123,8 @@ fn proposal_key_accepts_single_approver() {
 fn proposal_key_handles_zero_values() {
     let p = Contract::Proposal {
         callHash: B256::ZERO,
+        callLen: 0,
+        enactmentDelay: 0,
         creator: Address::ZERO,
         approvers: vec![],
         minApprovers: U256::ZERO,
@@ -125,6 +137,8 @@ fn proposal_key_handles_zero_values() {
 fn proposal_key_handles_max_values() {
     let p = Contract::Proposal {
         callHash: B256::repeat_byte(0xFF),
+        callLen: u32::MAX,
+        enactmentDelay: u32::MAX,
         creator: Address::ZERO,
         approvers: vec![Address::repeat_byte(0xFF)],
         minApprovers: U256::from(1u64),
@@ -164,9 +178,9 @@ fn proposal_key_errors_on_creator_as_approver() {
 fn proposal_key_golden_hash() {
     let key = proposal_key(&base()).unwrap();
     let expected: [u8; 32] = [
-        0xc9, 0xdb, 0x40, 0x1e, 0x69, 0x81, 0xec, 0xec, 0x5e, 0xf2, 0xe9, 0x5c, 0xf6, 0x5d, 0xfb,
-        0x7e, 0x07, 0x73, 0x94, 0x98, 0x0b, 0xc2, 0x00, 0xfc, 0x05, 0xef, 0x85, 0xcc, 0x0a, 0x22,
-        0xcb, 0xf5,
+        0x1d, 0x2e, 0x20, 0x20, 0x8a, 0xa5, 0x6e, 0xd9, 0xdf, 0xb7, 0x96, 0x54, 0x35, 0x65, 0x88,
+        0x94, 0x80, 0xc3, 0x73, 0x96, 0x91, 0xf7, 0xb9, 0x15, 0xc7, 0xdb, 0x1a, 0x4c, 0x87, 0x64,
+        0xda, 0x41,
     ];
     assert_eq!(key, expected, "got: {:02x?}", key);
 }
