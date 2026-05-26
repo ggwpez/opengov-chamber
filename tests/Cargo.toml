@@ -20,7 +20,7 @@ sp-runtime       = { path = "../../polkadot-sdk/substrate/primitives/runtime" }
 sp-keystore      = { path = "../../polkadot-sdk/substrate/primitives/keystore" }
 codec            = { version = "3.7.5", package = "parity-scale-codec" }
 scale-info       = { version = "2.11.6" }
-contract         = { path = "../contract" }
+contract         = { path = "../contract", features = ["std"] }
 
 [features]
 default = ["std"]

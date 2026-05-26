@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -6,7 +6,15 @@ use alloc::vec::Vec;
 use alloy_core::{primitives::keccak256, sol};
 
 pub use alloy_core::primitives::{Address, B256, U256};
+pub use alloy_core::sol_types;
 
+#[cfg(feature = "std")]
+sol! {
+    #![sol(extra_derives(Debug, PartialEq, Eq))]
+    "Contract.sol"
+}
+
+#[cfg(not(feature = "std"))]
 sol!("Contract.sol");
 
 const MAX_PROPOSAL_BYTES: usize = 1024;

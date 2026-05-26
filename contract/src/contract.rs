@@ -4,16 +4,17 @@
 pub mod plumbing;
 
 use alloy_core::{
-    primitives::{Address, U256},
-    sol_types::{SolCall, SolError, SolEvent, SolStruct, SolValue},
+    primitives::{Address, FixedBytes},
+    sol_types::{SolCall, SolValue},
 };
 use contract::{Contract, proposal_key};
 use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 
 const MAX_PROPOSAL_BYTES: usize = 1024;
+const ALL_PROPOSAL_KEYS_KEY: &[u8] = b"all_proposal_keys";
 
 /// This is the constructor which is called once per contract.
 #[polkavm_derive::polkavm_export]
@@ -44,13 +45,16 @@ pub extern "C" fn call() {
                 Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
             };
             if get_proposal(&key).is_some() {
-                panic!("Proposal already exists");
+                api::return_value(ReturnFlags::REVERT, &[]);
             }
             set_proposal(&prop);
 
-            //let proposal = get_proposal(&propose_call.callHash);
-            //api::return_value(ReturnFlags::empty(), &proposal.to_be_bytes::<32>());
-            panic!("yass");
+            api::return_value(ReturnFlags::empty(), &[]);
+        }
+
+        Contract::allProposalsCall::SELECTOR => {
+            let proposals = get_all_proposals();
+            api::return_value(ReturnFlags::empty(), &proposals.abi_encode());
         }
 
         /*Contract::mintCall::SELECTOR => {
@@ -114,6 +118,29 @@ fn set_proposal(prop: &Contract::Proposal) {
 
     let out = Contract::Proposal::abi_encode(prop);
     api::set_storage(StorageFlags::empty(), &key, &out);
+}
+
+fn set_all_proposal_keys(keys: &Vec<[u8; 32]>) {
+    api::set_storage(StorageFlags::empty(), ALL_PROPOSAL_KEYS_KEY, &keys.abi_encode());
+}
+
+fn get_all_proposal_keys() -> Vec<[u8; 32]> {
+    let mut buf = vec![0u8; MAX_PROPOSAL_BYTES]; // upper bound from max approvers
+    let mut out = buf.as_mut_slice();
+
+    if api::get_storage(StorageFlags::empty(), ALL_PROPOSAL_KEYS_KEY, &mut out).is_err() {
+        return Vec::new();
+    }
+    <Vec<FixedBytes<32>>>::abi_decode_validate(&out)
+        .map(|v| v.into_iter().map(|fb| fb.0).collect())
+        .unwrap_or_default()
+}
+
+fn get_all_proposals() -> Vec<Contract::Proposal> {
+    get_all_proposal_keys()
+        .iter()
+        .filter_map(get_proposal)
+        .collect()
 }
 
 /// Get totalSupply from storage

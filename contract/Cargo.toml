@@ -23,6 +23,9 @@ parity-scale-codec = { version = "*", default-features = false }
 [build-dependencies]
 cargo-pvm-contract-builder = "0.3.0"
 
+[features]
+std = []
+
 
 [profile.release]
 codegen-units = 1
