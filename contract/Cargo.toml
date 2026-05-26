@@ -1,0 +1,27 @@
+[package]
+name = "my-token"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+build = "build.rs"
+
+[[bin]]
+name = "my-token"
+path = "src/my-token.rs"
+
+[dependencies]
+alloy-core = { version = "0.8", default-features = false, features = ["sol-types"] }
+pallet-revive-uapi = { version = "0.10", default-features = false }
+picoalloc = { version = "5", default-features = false }
+polkavm-derive = { version = "0.31.0" }
+
+[build-dependencies]
+cargo-pvm-contract-builder = "0.3.0"
+
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+overflow-checks = false

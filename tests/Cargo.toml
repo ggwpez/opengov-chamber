@@ -1,0 +1,22 @@
+[package]
+name = "my-token-tests"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+# Path-dependencies on the local polkadot-sdk checkout at ../../polkadot-sdk.
+# Each path-dep's `workspace = true` references resolve through polkadot-sdk's
+# own workspace at /Users/vados/Documents/work/polkadot-sdk/Cargo.toml.
+[dependencies]
+pallet-revive    = { path = "../../polkadot-sdk/substrate/frame/revive" }
+frame-support    = { path = "../../polkadot-sdk/substrate/frame/support" }
+frame-system     = { path = "../../polkadot-sdk/substrate/frame/system" }
+pallet-balances  = { path = "../../polkadot-sdk/substrate/frame/balances" }
+pallet-timestamp = { path = "../../polkadot-sdk/substrate/frame/timestamp" }
+sp-core          = { path = "../../polkadot-sdk/substrate/primitives/core" }
+sp-io            = { path = "../../polkadot-sdk/substrate/primitives/io" }
+sp-runtime       = { path = "../../polkadot-sdk/substrate/primitives/runtime" }
+sp-keystore      = { path = "../../polkadot-sdk/substrate/primitives/keystore" }
+codec            = { version = "3.7.5", package = "parity-scale-codec" }
+scale-info       = { version = "2.11.6" }
