@@ -40,6 +40,27 @@ fn expected_submit_call(call_hash: H256) -> RuntimeCall {
     })
 }
 
+/// The contract hardcodes the referendum `SubmissionDeposit` and pallet-revive's
+/// `NativeToEthRatio` (it can't read runtime constants at execution time). Pin
+/// both to the real runtime values so a future change fails CI here rather than
+/// on-chain — they're multiplied together for the `finalize()` deposit check.
+#[test]
+fn submission_deposit_matches_runtime() {
+    use asset_hub_polkadot_runtime::Runtime;
+    use frame_support::traits::Get;
+
+    assert_eq!(
+        referendum::SUBMISSION_DEPOSIT,
+        <Runtime as pallet_referenda::Config>::SubmissionDeposit::get(),
+        "contract's hardcoded SUBMISSION_DEPOSIT diverged from the runtime's",
+    );
+    assert_eq!(
+        referendum::NATIVE_TO_ETH_RATIO,
+        u128::from(<<Runtime as pallet_revive::Config>::NativeToEthRatio as Get<u32>>::get()),
+        "contract's hardcoded NATIVE_TO_ETH_RATIO diverged from the runtime's",
+    );
+}
+
 #[test]
 fn encode_submit_call_matches_runtime() {
     let call_hash = [0xAA; 32];

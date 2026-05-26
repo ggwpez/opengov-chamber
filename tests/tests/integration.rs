@@ -1,5 +1,5 @@
 use contract::{B256, Contract, sol_types::{SolCall, SolError, SolEvent, SolValue}};
-use contract_tests::{ENDOWMENT, RuntimeEvent, RuntimeOrigin, System, Test, fund, new_test_ext};
+use contract_tests::{Balances, ENDOWMENT, RuntimeEvent, RuntimeOrigin, System, Test, fund, new_test_ext};
 use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
     test_utils::{
@@ -10,7 +10,7 @@ use pallet_revive::{
     },
 };
 use pallet_revive_uapi::ReturnFlags;
-use contract::{Address, proposal_key};
+use contract::{Address, proposal_key, xcm::referendum::SUBMISSION_DEPOSIT};
 
 /// Built by `cd ../contract && cargo build` (build.rs runs PvmBuilder).
 /// Lands in the shared `target/` thanks to `.cargo/config.toml`.
@@ -319,15 +319,169 @@ fn finalize_after_threshold_succeeds() {
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
-        // With the threshold met, finalize succeeds.
+        // With the threshold met, finalize succeeds — sending the SubmissionDeposit
+        // as value so the contract can cover the referendum deposit.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
             .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .native_value(SUBMISSION_DEPOSIT)
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::empty());
+    });
+}
+
+/// `finalize()` should not merely *not error* — it should actually submit a
+/// referendum into `pallet_referenda` referencing our preimage by `hash`/`len`.
+///
+/// Two non-obvious facts this test pins down (both found by reading raw runtime
+/// storage, which we can do because the harness runs the *real* runtime):
+///
+/// 1. The XCM `Transact` dispatches `Referenda::submit` as the contract's own
+///    sovereign account, which must hold the `SubmissionDeposit`. `finalize()`
+///    collects it from the caller as call value (see `finalize_without_deposit_reverts`
+///    for the no-value path); pallet-revive credits it to the contract before the
+///    submit, so the deposit is covered. If it weren't, `submit` would fail with
+///    `Balances::InsufficientBalance`, XCM `Transact` would *swallow* that error
+///    (the XCM still reports `Complete`), and `finalize()` would return success
+///    while creating nothing.
+///
+/// 2. The preimage itself is *not* present afterwards: the contract only
+///    references it by hash (`Bounded::Lookup`) and never calls
+///    `Preimage::note_preimage`. Referenda permits submitting against an un-noted
+///    hash, so we assert the *reference* is correct rather than preimage presence.
+#[test]
+fn finalize_submits_referendum() {
+    use frame_support::traits::{Bounded, fungible::Inspect};
+    use sp_core::H256;
+
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
                 proposalHash: key.into(),
             }.abi_encode())
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
+        // Nothing submitted yet.
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 0);
+
+        let alice_before = Balances::balance(&ALICE);
+
+        // Send the SubmissionDeposit as value; the contract then covers the deposit
+        // when the XCM submit dispatches as its sovereign account (see fact #1).
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .native_value(SUBMISSION_DEPOSIT)
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
         assert_eq!(result.flags, ReturnFlags::empty());
+
+        // The deposit really left the caller (this is the contrast that makes
+        // `finalize_without_deposit_reverts`'s "balance unchanged" meaningful): it
+        // funded the deposit now held against the contract's sovereign account.
+        assert_eq!(
+            Balances::balance(&ALICE),
+            alice_before - SUBMISSION_DEPOSIT,
+            "successful finalize must debit the caller by the SubmissionDeposit",
+        );
+
+        // Exactly one referendum now exists, and its proposal is the preimage
+        // lookup the contract built — matching `callHash` and the `callLen` we
+        // threaded through (no longer the old `len: 0` placeholder).
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 1);
+        let info = pallet_referenda::ReferendumInfoFor::<Test>::get(0)
+            .expect("referendum 0 should have been submitted");
+        match info {
+            pallet_referenda::ReferendumInfo::Ongoing(status) => {
+                assert_eq!(
+                    status.proposal,
+                    Bounded::Lookup {
+                        hash: H256::from(expected_proposal.callHash.0),
+                        len: expected_proposal.callLen,
+                    },
+                    "submitted referendum must reference our preimage hash/len",
+                );
+            }
+            other => panic!("expected an ongoing referendum, got {:?}", other),
+        }
+
+        // The preimage itself was never noted — only referenced (see fact #2).
+        assert!(
+            !pallet_preimage::PreimageFor::<Test>::contains_key((
+                H256::from(expected_proposal.callHash.0),
+                expected_proposal.callLen,
+            )),
+            "contract must not have noted the preimage, only referenced it",
+        );
+    });
+}
+
+/// Finalizing an approved proposal with less than the `SubmissionDeposit` reverts
+/// with `InsufficientDeposit`, submits no referendum, and — crucially — the value
+/// the caller attached is rolled back to them (pallet-revive moves value at frame
+/// entry and unwinds it on `REVERT`). The companion `finalize_submits_referendum`
+/// asserts the contrast: a *successful* finalize actually debits the deposit, so
+/// this "balance unchanged" assertion isn't vacuously true.
+#[test]
+fn finalize_without_deposit_reverts() {
+    use frame_support::traits::fungible::Inspect;
+    use pallet_revive::AddressMapper;
+
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
+        let alice_before = Balances::balance(&ALICE);
+        let contract_before = Balances::balance(&contract_acct);
+
+        // One planck under the deposit, so finalize reverts at the deposit check.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .native_value(SUBMISSION_DEPOSIT - 1)
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert_eq!(
+            result.data,
+            <Contract::InsufficientDeposit as SolError>::abi_encode(
+                &Contract::InsufficientDeposit {}
+            ),
+        );
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 0);
+
+        // The attached value was rolled back: caller made whole, nothing stuck
+        // to the contract.
+        assert_eq!(
+            Balances::balance(&ALICE),
+            alice_before,
+            "reverted finalize must refund the caller's attached value",
+        );
+        assert_eq!(
+            Balances::balance(&contract_acct),
+            contract_before,
+            "no value should remain with the contract after a revert",
+        );
     });
 }
 
@@ -350,6 +504,7 @@ fn finalize_emits_event() {
             .data(Contract::finalizeCall {
                 proposalHash: key.into(),
             }.abi_encode())
+            .native_value(SUBMISSION_DEPOSIT)
             .transaction_limits(limits())
             .build_and_unwrap_result();
 

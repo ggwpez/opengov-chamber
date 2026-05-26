@@ -1839,6 +1839,7 @@ dependencies = [
  "frame-support",
  "frame-system",
  "pallet-balances",
+ "pallet-preimage",
  "pallet-referenda",
  "pallet-revive",
  "pallet-revive-uapi 0.13.0",

@@ -47,6 +47,23 @@ pub mod referendum {
     /// variant in that pallet's `Origin` enum.
     const WHITELISTED_CALLER_ORIGIN_INDEX: u8 = 13;
 
+    /// `Referenda::submit` reserves `T::SubmissionDeposit` from the dispatch
+    /// origin — which, via the XCM `Transact`, is the contract's own sovereign
+    /// account. So `finalize()` requires the caller to send at least this much
+    /// value, leaving the contract able to cover the deposit. Pinned to Asset
+    /// Hub's `SubmissionDeposit` (10 DOT = `10 * DOLLARS`, DOT having 10 decimals)
+    /// and verified against the real runtime in `tests/tests/xcm.rs`.
+    ///
+    /// This is in **native** plancks. Note pallet-revive denominates the value a
+    /// contract observes via `value_transferred` in *EVM* units, so the check in
+    /// `finalize()` scales this by [`NATIVE_TO_ETH_RATIO`].
+    pub const SUBMISSION_DEPOSIT: u128 = 100_000_000_000;
+
+    /// pallet-revive's `NativeToEthRatio` on Asset Hub (`10^(18-10)`): the factor
+    /// between native plancks and the EVM-denominated balances that host functions
+    /// like `value_transferred` report. Pinned + verified in `tests/tests/xcm.rs`.
+    pub const NATIVE_TO_ETH_RATIO: u128 = 100_000_000;
+
     // --- Placeholders (see the module-level warning) ------------------------
 
     /// TODO(placeholder): fallback weight for the inner `submit` call.

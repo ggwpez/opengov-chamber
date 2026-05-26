@@ -98,6 +98,22 @@ pub extern "C" fn call() {
                 Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
             };
 
+            // The XCM `Transact` dispatches `Referenda::submit` as this contract's
+            // own sovereign account, which must hold the referendum
+            // `SubmissionDeposit`. pallet-revive has already credited any value
+            // sent with this call to the contract account, so require it to cover
+            // the deposit. (On revert the transfer is rolled back, refunding the
+            // caller.)
+            let mut value_buf = [0u8; 32];
+            api::value_transferred(&mut value_buf);
+            let value = U256::from_le_bytes::<32>(value_buf);
+            // `value` is EVM-denominated; the deposit is native, so scale it up.
+            let required = U256::from(xcm::referendum::SUBMISSION_DEPOSIT)
+                * U256::from(xcm::referendum::NATIVE_TO_ETH_RATIO);
+            if value < required {
+                revert_insufficient_deposit();
+            }
+
             // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
             // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
             // under this contract's signed origin.
@@ -332,6 +348,14 @@ mod events {
 fn revert_not_approved() -> ! {
     let error = Contract::NotApproved {};
     let encoded_error = <Contract::NotApproved as SolError>::abi_encode(&error);
+    api::return_value(ReturnFlags::REVERT, &encoded_error);
+}
+
+/// Revert with the `InsufficientDeposit` Solidity error.
+#[inline]
+fn revert_insufficient_deposit() -> ! {
+    let error = Contract::InsufficientDeposit {};
+    let encoded_error = <Contract::InsufficientDeposit as SolError>::abi_encode(&error);
     api::return_value(ReturnFlags::REVERT, &encoded_error);
 }
 
