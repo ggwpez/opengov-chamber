@@ -40,6 +40,13 @@ pub mod referendum {
     /// `Referenda::submit` is `#[pallet::call_index(0)]`.
     const REFERENDA_SUBMIT_CALL_INDEX: u8 = 0;
 
+    /// `OriginCaller::Origins` variant — `construct_runtime!` numbers `OriginCaller`
+    /// variants by pallet index, and `pallet_custom_origins` is index 63 on Asset Hub.
+    const ORIGINS_VARIANT_INDEX: u8 = 63;
+    /// `pallet_custom_origins::Origin::WhitelistedCaller` — the 14th (index 13)
+    /// variant in that pallet's `Origin` enum.
+    const WHITELISTED_CALLER_ORIGIN_INDEX: u8 = 13;
+
     // --- Placeholders (see the module-level warning) ------------------------
 
     /// TODO(placeholder): the preimage length is not stored on the proposal yet.
@@ -57,16 +64,16 @@ pub mod referendum {
 
     /// SCALE-encode `RuntimeCall::Referenda(submit { .. })` referencing `call_hash`
     /// as a preimage lookup.
-    fn encode_submit_call(call_hash: &[u8; 32]) -> Vec<u8> {
+    pub fn encode_submit_call(call_hash: &[u8; 32]) -> Vec<u8> {
         let mut call = Vec::new();
         call.push(REFERENDA_PALLET_INDEX);
         call.push(REFERENDA_SUBMIT_CALL_INDEX);
 
         // proposal_origin: Box<OriginCaller>.
-        // TODO(placeholder): use the intended governance track origin. For now
-        // `OriginCaller::system(frame_system::RawOrigin::Root)` => [0x00, 0x00].
-        call.push(0x00); // OriginCaller::System variant
-        call.push(0x00); // frame_system::RawOrigin::Root
+        // `OriginCaller::Origins(pallet_custom_origins::Origin::WhitelistedCaller)`
+        // — the governance track for dispatching whitelisted calls.
+        call.push(ORIGINS_VARIANT_INDEX);
+        call.push(WHITELISTED_CALLER_ORIGIN_INDEX);
 
         // proposal: Bounded::Lookup { hash, len } (variant index 2).
         call.push(0x02);

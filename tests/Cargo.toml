@@ -21,6 +21,7 @@ pallet-revive    = { version = "0.17.0" }
 # (the type of `ExecReturnValue.flags`) unifies.
 pallet-revive-uapi = { version = "0.13.0" }
 pallet-referenda = { version = "48.0.0" }
+xcm              = { version = "23.0.1", package = "staging-xcm" }
 frame-support    = { version = "47.0.0" }
 frame-system     = { version = "47.0.0" }
 pallet-balances  = { version = "49.0.0" }

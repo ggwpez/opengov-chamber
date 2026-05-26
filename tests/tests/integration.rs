@@ -368,8 +368,6 @@ fn finalize_emits_event() {
         assert_eq!(topics[0].0, Contract::Finalized::SIGNATURE_HASH.0);
         assert_eq!(topics[1].0, key);
         assert_eq!(topics[2].0, expected_proposal.callHash.0);
-
-        panic!("events: {:?}", System::events())
     });
 }
 
