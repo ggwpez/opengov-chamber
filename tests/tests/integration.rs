@@ -1,5 +1,5 @@
 use contract::{B256, Contract, sol_types::{SolCall, SolError, SolEvent, SolValue}};
-use contract_tests::{Test, fund, new_test_ext, RuntimeEvent, RuntimeOrigin, System};
+use contract_tests::{ENDOWMENT, RuntimeEvent, RuntimeOrigin, System, Test, fund, new_test_ext};
 use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
     test_utils::{
@@ -20,7 +20,7 @@ const BLOB: &[u8] = include_bytes!("../../target/contract.release.polkavm");
 fn limits() -> TransactionLimits<Test> {
     TransactionLimits::WeightAndDeposit {
         weight_limit: Weight::from_parts(u64::MAX / 2, u64::MAX / 2),
-        deposit_limit: u64::MAX / 2,
+        deposit_limit: u128::MAX / 2,
     }
 }
 
@@ -37,7 +37,7 @@ fn blob_size_is_sane() {
 ///
 /// Returns the contract address and the proposal that was created.
 fn setup_with_proposal() -> (H160, Contract::Proposal) {
-    fund(&ALICE, u64::MAX / 2);
+    fund(&ALICE, ENDOWMENT);
     let expected_proposal = Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
         creator: Address::from(ALICE_ADDR.0),
@@ -153,7 +153,7 @@ fn propose_emits_event() {
 #[test]
 fn approve_records_approval() {
     new_test_ext().execute_with(|| {
-        fund(&BOB, u64::MAX / 2);
+        fund(&BOB, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -185,7 +185,7 @@ fn approve_records_approval() {
 #[test]
 fn approve_emits_event() {
     new_test_ext().execute_with(|| {
-        fund(&BOB, u64::MAX / 2);
+        fund(&BOB, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -221,7 +221,7 @@ fn approve_emits_event() {
 #[test]
 fn approve_nonexistent_proposal_reverts() {
     new_test_ext().execute_with(|| {
-        fund(&CHARLIE, u64::MAX / 2);
+        fund(&CHARLIE, ENDOWMENT);
         let (addr, _expected_proposal) = setup_with_proposal();
 
         // A hash that doesn't map to any stored proposal.
@@ -240,7 +240,7 @@ fn approve_nonexistent_proposal_reverts() {
 #[test]
 fn approve_by_non_approver_reverts() {
     new_test_ext().execute_with(|| {
-        fund(&CHARLIE, u64::MAX / 2);
+        fund(&CHARLIE, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -271,7 +271,7 @@ fn approve_by_non_approver_reverts() {
 #[test]
 fn approving_twice_by_same_account_reverts() {
     new_test_ext().execute_with(|| {
-        fund(&BOB, u64::MAX / 2);
+        fund(&BOB, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -301,7 +301,7 @@ fn approving_twice_by_same_account_reverts() {
 #[test]
 fn finalize_after_threshold_succeeds() {
     new_test_ext().execute_with(|| {
-        fund(&BOB, u64::MAX / 2);
+        fund(&BOB, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -328,7 +328,7 @@ fn finalize_after_threshold_succeeds() {
 #[test]
 fn finalize_emits_event() {
     new_test_ext().execute_with(|| {
-        fund(&BOB, u64::MAX / 2);
+        fund(&BOB, ENDOWMENT);
         let (addr, expected_proposal) = setup_with_proposal();
         let key = proposal_key(&expected_proposal).unwrap();
 
@@ -339,6 +339,7 @@ fn finalize_emits_event() {
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
+        System::reset_events();
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
             .data(Contract::finalizeCall {
                 proposalHash: key.into(),
@@ -367,6 +368,8 @@ fn finalize_emits_event() {
         assert_eq!(topics[0].0, Contract::Finalized::SIGNATURE_HASH.0);
         assert_eq!(topics[1].0, key);
         assert_eq!(topics[2].0, expected_proposal.callHash.0);
+
+        panic!("events: {:?}", System::events())
     });
 }
 

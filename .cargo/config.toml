@@ -1,2 +1,8 @@
 [build]
 target-dir = "target"
+
+# The integration tests depend on `asset-hub-polkadot-runtime`, whose build
+# script compiles the runtime to wasm via substrate-wasm-builder. We only use
+# the native runtime for `TestExternalities`, so skip that (huge) wasm build.
+[env]
+SKIP_WASM_BUILD = "1"

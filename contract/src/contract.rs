@@ -7,8 +7,8 @@ use alloy_core::{
     primitives::{Address, FixedBytes, U256},
     sol_types::{sol_data, EventTopic, SolCall, SolError, SolEvent, SolValue},
 };
-use contract::{Contract, ProposalError, proposal_key};
-use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
+use contract::{Contract, ProposalError, proposal_key, xcm};
+use pallet_revive_uapi::{CallFlags, HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
 use alloc::{vec, vec::Vec};
@@ -96,8 +96,24 @@ pub extern "C" fn call() {
                 Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
             };
 
-            // TODO: dispatch a Substrate call into the referenda pallet to create the
-            // referendum for `proposal.callHash`. For now we only emit an event.
+            // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
+            // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
+            // under this contract's signed origin.
+            let input = xcm::referendum::build_execute_calldata(&proposal.callHash.0);
+            let dispatched = api::call(
+                CallFlags::empty(),
+                &xcm::XCM_PRECOMPILE_ADDR,
+                u64::MAX,       // ref_time limit: use all available
+                u64::MAX,       // proof_size limit: use all available
+                &[u8::MAX; 32], // no storage deposit limit
+                &[0u8; 32],     // no value transferred
+                &input,
+                None,
+            );
+            if dispatched.is_err() {
+                api::return_value(ReturnFlags::REVERT, &[]);
+            }
+
             events::finalized(&finalize_call.proposalHash, &proposal.callHash);
 
             api::return_value(ReturnFlags::empty(), &[]);
