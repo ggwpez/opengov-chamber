@@ -5,6 +5,10 @@ edition = "2024"
 rust-version = "1.92"
 build = "build.rs"
 
+[lib]
+name = "contract"
+path = "src/lib.rs"
+
 [[bin]]
 name = "contract"
 path = "src/contract.rs"
@@ -14,6 +18,7 @@ alloy-core = { version = "1.6", default-features = false, features = ["sol-types
 pallet-revive-uapi = { version = "0.14", default-features = false }
 picoalloc = { version = "5", default-features = false }
 polkavm-derive = { version = "0.33.0" }
+parity-scale-codec = { version = "*", default-features = false }
 
 [build-dependencies]
 cargo-pvm-contract-builder = "0.3.0"

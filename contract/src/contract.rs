@@ -5,15 +5,15 @@ pub mod plumbing;
 
 use alloy_core::{
     primitives::{Address, U256},
-    sol,
-    sol_types::{SolCall, SolError, SolEvent},
+    sol_types::{SolCall, SolError, SolEvent, SolStruct, SolValue},
 };
+use contract::{Contract, proposal_key};
 use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
 use alloc::vec;
 
-sol!("Contract.sol");
+const MAX_PROPOSAL_BYTES: usize = 1024;
 
 /// This is the constructor which is called once per contract.
 #[polkavm_derive::polkavm_export]
@@ -29,15 +29,31 @@ pub extern "C" fn call() {
     let selector: [u8; 4] = call_data[0..4].try_into().unwrap();
 
     match selector {
-        Contract::balanceOfCall::SELECTOR => {
-            let balance_of_call = Contract::balanceOfCall::abi_decode_validate(&call_data)
-                .expect("Failed to decode balanceOf call");
+        Contract::proposeCall::SELECTOR => {
+            let call: Contract::proposeCall = Contract::proposeCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode propose call");
+            let prop = Contract::Proposal {
+                callHash: call.callHash,
+                creator: get_caller(),
+                approvers: call.approvers,
+                minApprovers: call.minApprovers
+            };
 
-            let balance = get_balance(&balance_of_call.account.into_array());
-            api::return_value(ReturnFlags::empty(), &balance.to_be_bytes::<32>());
+            let key = match proposal_key(&prop) {
+                Ok(k) => k,
+                Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
+            };
+            if get_proposal(&key).is_some() {
+                panic!("Proposal already exists");
+            }
+            set_proposal(&prop);
+
+            //let proposal = get_proposal(&propose_call.callHash);
+            //api::return_value(ReturnFlags::empty(), &proposal.to_be_bytes::<32>());
+            panic!("yass");
         }
 
-        Contract::mintCall::SELECTOR => {
+        /*Contract::mintCall::SELECTOR => {
             let mint_call = Contract::mintCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode mint call");
 
@@ -79,29 +95,29 @@ pub extern "C" fn call() {
                 transfer_call.to,
                 transfer_call.amount,
             );
-        }
+        }*/
 
         _ => panic!("Unknown function selector"),
     }
 }
 
-/// Storage key for totalSupply (slot 0)
-#[inline]
-fn total_supply_key() -> [u8; 32] {
-    [0u8; 32] // Slot 0
+fn get_proposal(key: &[u8; 32]) -> Option<Contract::Proposal> {
+    let mut buf = vec![0u8; MAX_PROPOSAL_BYTES]; // upper bound from max approvers
+    let mut out = buf.as_mut_slice();
+
+    api::get_storage(StorageFlags::empty(), key, &mut out).ok()?;
+    Contract::Proposal::abi_decode_validate(&out).ok()
 }
 
-/// Storage key for balances[address]: "Balance:" prefix + zero pad + 20-byte address.
-/// Safe vs total_supply_key (all-zero) because the prefix starts with non-zero 'B'.
-fn balance_key(addr: &[u8; 20]) -> [u8; 32] {
-    let mut key = [0u8; 32];
-    key[0..8].copy_from_slice(b"Balance:");
-    key[12..32].copy_from_slice(addr);
-    key
+fn set_proposal(prop: &Contract::Proposal) {
+    let key = proposal_key(prop).unwrap();
+
+    let out = Contract::Proposal::abi_encode(prop);
+    api::set_storage(StorageFlags::empty(), &key, &out);
 }
 
 /// Get totalSupply from storage
-fn get_total_supply() -> U256 {
+/*fn get_total_supply() -> U256 {
     let key = total_supply_key();
     let mut supply_bytes = vec![0u8; 32];
     let mut supply_output = supply_bytes.as_mut_slice();
@@ -110,17 +126,17 @@ fn get_total_supply() -> U256 {
         Ok(_) => U256::from_be_bytes::<32>(supply_output[0..32].try_into().unwrap()),
         Err(_) => U256::ZERO,
     }
-}
+}*/
 
 /// Set totalSupply in storage
-#[inline]
+/*#[inline]
 fn set_total_supply(amount: U256) {
     let key = total_supply_key();
     api::set_storage(StorageFlags::empty(), &key, &amount.to_be_bytes::<32>());
-}
+}*/
 
 /// Get the balance for a given address from storage
-#[inline]
+/*#[inline]
 fn get_balance(addr: &[u8; 20]) -> U256 {
     let key = balance_key(addr);
     let mut balance_bytes = vec![0u8; 32];
@@ -130,17 +146,17 @@ fn get_balance(addr: &[u8; 20]) -> U256 {
         Ok(_) => U256::from_be_bytes::<32>(balance_output[0..32].try_into().unwrap()),
         Err(_) => U256::ZERO,
     }
-}
+}*/
 
 /// Set the balance for a given address in storage
-#[inline]
-fn set_balance(addr: &[u8; 20], amount: U256) {
+/*#[inline]
+{fn }set_balance(addr: &[u8; 20], amount: U256) {
     let key = balance_key(addr);
     api::set_storage(StorageFlags::empty(), &key, &amount.to_be_bytes::<32>());
-}
+}*/
 
-/// Emit a Transfer event
-#[inline]
+// Emit a Transfer event
+/*#[inline]
 fn emit_transfer(from: Address, to: Address, value: U256) {
     let event = Contract::Transfer { from, to, value };
     let topics = [
@@ -150,20 +166,19 @@ fn emit_transfer(from: Address, to: Address, value: U256) {
     ];
     let data = event.value.to_be_bytes::<32>();
     api::deposit_event(&topics, &data);
-}
+}*/
 
-/// Revert with an InsufficientBalance error
-#[inline]
+/*#[inline]
 fn revert_insufficient_balance() -> ! {
     let error = Contract::InsufficientBalance {};
     let encoded_error = <Contract::InsufficientBalance as SolError>::abi_encode(&error);
     api::return_value(ReturnFlags::REVERT, &encoded_error);
-}
+}*/
 
 /// Get the caller's address
 #[inline]
-fn get_caller() -> [u8; 20] {
+fn get_caller() -> Address {
     let mut caller = [0u8; 20];
     api::caller(&mut caller);
-    caller
+    caller.into()
 }
