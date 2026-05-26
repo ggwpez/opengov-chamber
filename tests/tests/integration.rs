@@ -1,4 +1,4 @@
-use contract::{B256, Contract, sol_types::{SolCall, SolEvent, SolValue}};
+use contract::{B256, Contract, sol_types::{SolCall, SolError, SolEvent, SolValue}};
 use contract_tests::{Test, fund, new_test_ext, RuntimeEvent, RuntimeOrigin, System};
 use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
@@ -295,5 +295,117 @@ fn approving_twice_by_same_account_reverts() {
 
         assert_eq!(second.flags, ReturnFlags::REVERT);
         assert!(second.data.is_empty());
+    });
+}
+
+#[test]
+fn finalize_after_threshold_succeeds() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // BOB approves, meeting `minApprovers: 1`.
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        // With the threshold met, finalize succeeds.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::empty());
+    });
+}
+
+#[test]
+fn finalize_emits_event() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        // Take the *last* `ContractEmitted` event — propose and approve emit
+        // their own, so the finalize event is the most recent.
+        let (topics, _data) = System::events()
+            .into_iter()
+            .rev()
+            .find_map(|record| match record.event {
+                RuntimeEvent::Revive(pallet_revive::Event::ContractEmitted {
+                    contract,
+                    topics,
+                    data,
+                }) if contract == addr => Some((topics, data)),
+                _ => None,
+            })
+            .expect("finalize should emit a ContractEmitted event");
+
+        // topic[0] is the event signature; topic[1] is the indexed proposalHash,
+        // topic[2] the indexed callHash.
+        assert_eq!(topics.len(), 3);
+        assert_eq!(topics[0].0, Contract::Finalized::SIGNATURE_HASH.0);
+        assert_eq!(topics[1].0, key);
+        assert_eq!(topics[2].0, expected_proposal.callHash.0);
+    });
+}
+
+#[test]
+fn finalize_below_threshold_reverts() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // No approvals yet, so finalize reverts with the `NotApproved` error.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert_eq!(
+            result.data,
+            <Contract::NotApproved as SolError>::abi_encode(&Contract::NotApproved {}),
+        );
+    });
+}
+
+#[test]
+fn finalize_nonexistent_proposal_reverts() {
+    new_test_ext().execute_with(|| {
+        let (addr, _expected_proposal) = setup_with_proposal();
+
+        // A hash that doesn't map to any stored proposal.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: B256::repeat_byte(0xFF),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
     });
 }

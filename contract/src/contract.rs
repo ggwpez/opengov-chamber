@@ -4,8 +4,8 @@
 pub mod plumbing;
 
 use alloy_core::{
-    primitives::{Address, FixedBytes},
-    sol_types::{sol_data, EventTopic, SolCall, SolEvent, SolValue},
+    primitives::{Address, FixedBytes, U256},
+    sol_types::{sol_data, EventTopic, SolCall, SolError, SolEvent, SolValue},
 };
 use contract::{Contract, ProposalError, proposal_key};
 use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
@@ -89,7 +89,18 @@ pub extern "C" fn call() {
         Contract::finalizeCall::SELECTOR => {
             let finalize_call = Contract::finalizeCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode finalize call");
-            
+
+            let proposal = match finalize_proposal(&finalize_call.proposalHash) {
+                Ok(p) => p,
+                Err(ProposalError::NotApproved) => revert_not_approved(),
+                Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
+            };
+
+            // TODO: dispatch a Substrate call into the referenda pallet to create the
+            // referendum for `proposal.callHash`. For now we only emit an event.
+            events::finalized(&finalize_call.proposalHash, &proposal.callHash);
+
+            api::return_value(ReturnFlags::empty(), &[]);
         }
 
         /*Contract::mintCall::SELECTOR => {
@@ -200,6 +211,19 @@ fn approve_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
     Ok(())
 }
 
+/// Load a proposal and verify it has reached its approval threshold.
+///
+/// Returns the proposal on success so the caller can act on its `callHash`.
+fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError> {
+    let proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
+
+    if U256::from(proposal.approvedBy.len() as u64) < proposal.minApprovers {
+        return Err(ProposalError::NotApproved);
+    }
+
+    Ok(proposal)
+}
+
 /// Get totalSupply from storage
 /*fn get_total_supply() -> U256 {
     let key = total_supply_key();
@@ -268,6 +292,25 @@ mod events {
         let data = event.encode_data();
         api::deposit_event(&topics, &data);
     }
+
+    pub fn finalized(key: &[u8; 32], call_hash: &FixedBytes<32>) {
+        let event = Contract::Finalized {
+            proposalHash: key.into(),
+            callHash: *call_hash,
+        };
+        // 1 signature hash + 2 indexed params.
+        let topics = event.encode_topics_array::<3>().map(|t| t.0.0);
+        let data = event.encode_data();
+        api::deposit_event(&topics, &data);
+    }
+}
+
+/// Revert with the `NotApproved` Solidity error.
+#[inline]
+fn revert_not_approved() -> ! {
+    let error = Contract::NotApproved {};
+    let encoded_error = <Contract::NotApproved as SolError>::abi_encode(&error);
+    api::return_value(ReturnFlags::REVERT, &encoded_error);
 }
 
 // Emit a Transfer event

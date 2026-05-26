@@ -13,6 +13,7 @@ interface Contract {
 
     event Proposed(bytes32 indexed callHash, address indexed creator, address[] indexed approvers, uint256 minApprovers);
     event Approved(bytes32 indexed proposalHash);
+    event Finalized(bytes32 indexed proposalHash, bytes32 indexed callHash);
 
     error NotApproved();
 
