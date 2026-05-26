@@ -20,3 +20,17 @@ sp-runtime       = { path = "../../polkadot-sdk/substrate/primitives/runtime" }
 sp-keystore      = { path = "../../polkadot-sdk/substrate/primitives/keystore" }
 codec            = { version = "3.7.5", package = "parity-scale-codec" }
 scale-info       = { version = "2.11.6" }
+
+[features]
+default = ["std"]
+std = [
+	"pallet-revive/std",
+	"frame-support/std",
+	"frame-system/std",
+	"pallet-balances/std",
+	"pallet-timestamp/std",
+	"sp-core/std",
+	"sp-io/std",
+	"sp-runtime/std",
+	"sp-keystore/std",
+]

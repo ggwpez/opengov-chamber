@@ -5,7 +5,7 @@
 //! Anything pallet_revive's Config doesn't strictly need is omitted (no
 //! pallet_assets, no pallet_proxy, no pallet_utility, no pallet_transaction_payment).
 
-use frame_support::{construct_runtime, derive_impl, parameter_types, traits::ConstU32};
+use frame_support::{construct_runtime, derive_impl, traits::ConstU32};
 use frame_system::EnsureSigned;
 use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};
 
