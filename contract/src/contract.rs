@@ -37,7 +37,8 @@ pub extern "C" fn call() {
                 callHash: call.callHash,
                 creator: get_caller(),
                 approvers: call.approvers,
-                minApprovers: call.minApprovers
+                minApprovers: call.minApprovers,
+                approvedBy: Vec::new(),
             };
 
             let key = match proposal_key(&prop) {
@@ -83,6 +84,12 @@ pub extern "C" fn call() {
 
             events::approved(&approve_call.proposalHash);
             api::return_value(ReturnFlags::empty(), &[]);
+        }
+
+        Contract::finalizeCall::SELECTOR => {
+            let finalize_call = Contract::finalizeCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode finalize call");
+            
         }
 
         /*Contract::mintCall::SELECTOR => {
@@ -179,11 +186,15 @@ fn get_all_proposals() -> Vec<Contract::Proposal> {
 
 fn approve_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
     let mut proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
-    if proposal.approvers.contains(&get_caller()) {
+
+    if !proposal.approvers.contains(&get_caller()) {
+        return Err(ProposalError::NotAnApprover);
+    }
+    if proposal.approvedBy.contains(&get_caller()) {
         return Err(ProposalError::AlreadyApproved);
     }
 
-    proposal.approvers.push(get_caller());
+    proposal.approvedBy.push(get_caller());
     set_proposal(&proposal);
 
     Ok(())

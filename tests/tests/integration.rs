@@ -4,7 +4,8 @@ use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
     test_utils::{
         ALICE, ALICE_ADDR,
-        BOB_ADDR,
+        BOB, BOB_ADDR,
+        CHARLIE,
         builder::{BareCallBuilder, BareInstantiateBuilder},
     },
 };
@@ -42,6 +43,7 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
         creator: Address::from(ALICE_ADDR.0),
         approvers: vec![Address::from(BOB_ADDR.0)],
         minApprovers: contract::U256::from(1u64),
+        approvedBy: vec![],
     };
 
     let contract = BareInstantiateBuilder::<Test>::bare_instantiate(
@@ -145,5 +147,153 @@ fn propose_emits_event() {
 
         // The only non-indexed field, `minApprovers`, lands in the data section.
         assert_eq!(data, expected_proposal.minApprovers.to_be_bytes::<32>());
+    });
+}
+
+#[test]
+fn approve_records_approval() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // BOB is an authorized approver and approves the proposal.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        // Approving records the caller in `approvedBy` and leaves `approvers`
+        // (and therefore the key) untouched — so the proposal is still found
+        // under its original key.
+        let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::proposalCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        let proposal = <Contract::Proposal>::abi_decode_validate(&proposal.data).unwrap();
+        assert_eq!(proposal.approvers, expected_proposal.approvers);
+        assert_eq!(proposal.approvedBy, vec![Address::from(BOB_ADDR.0)]);
+    });
+}
+
+#[test]
+fn approve_emits_event() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        // Take the *last* `ContractEmitted` event — propose emits one too, so
+        // the approve event is the most recent.
+        let (topics, _data) = System::events()
+            .into_iter()
+            .rev()
+            .find_map(|record| match record.event {
+                RuntimeEvent::Revive(pallet_revive::Event::ContractEmitted {
+                    contract,
+                    topics,
+                    data,
+                }) if contract == addr => Some((topics, data)),
+                _ => None,
+            })
+            .expect("approve should emit a ContractEmitted event");
+
+        // topic[0] is the event signature; topic[1] is the indexed proposalHash.
+        assert_eq!(topics.len(), 2);
+        assert_eq!(topics[0].0, Contract::Approved::SIGNATURE_HASH.0);
+        assert_eq!(topics[1].0, key);
+    });
+}
+
+#[test]
+fn approve_nonexistent_proposal_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&CHARLIE, u64::MAX / 2);
+        let (addr, _expected_proposal) = setup_with_proposal();
+
+        // A hash that doesn't map to any stored proposal.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(CHARLIE), addr)
+            .data(Contract::approveCall {
+                proposalHash: B256::repeat_byte(0xFF),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+    });
+}
+
+#[test]
+fn approve_by_non_approver_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&CHARLIE, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // CHARLIE isn't in `approvers` (only BOB is), so approving reverts
+        // with `NotAnApprover`.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(CHARLIE), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        // And nothing was recorded against the proposal.
+        let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::proposalCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        let proposal = <Contract::Proposal>::abi_decode_validate(&proposal.data).unwrap();
+        assert!(proposal.approvedBy.is_empty());
+    });
+}
+
+#[test]
+fn approving_twice_by_same_account_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, u64::MAX / 2);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // First approval from BOB (an authorized approver) succeeds.
+        let first = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(first.flags, ReturnFlags::empty());
+
+        // BOB is now in `approvedBy`, so a second approval reverts with
+        // `AlreadyApproved`.
+        let second = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(second.flags, ReturnFlags::REVERT);
+        assert!(second.data.is_empty());
     });
 }

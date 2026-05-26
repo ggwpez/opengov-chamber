@@ -8,11 +8,12 @@ interface Contract {
         address creator;
         address[] approvers;
         uint256 minApprovers;
+        address[] approvedBy;
     }
 
     event Proposed(bytes32 indexed callHash, address indexed creator, address[] indexed approvers, uint256 minApprovers);
     event Approved(bytes32 indexed proposalHash);
-    
+
     error NotApproved();
 
     function allProposals() external view returns (Proposal[] memory);

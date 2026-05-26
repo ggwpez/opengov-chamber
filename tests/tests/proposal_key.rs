@@ -6,6 +6,7 @@ fn base() -> Contract::Proposal {
         creator: Address::repeat_byte(0x11),
         approvers: vec![Address::repeat_byte(0x22), Address::repeat_byte(0x33)],
         minApprovers: U256::from(2u64),
+        approvedBy: vec![],
     }
 }
 
@@ -48,6 +49,34 @@ fn proposal_key_changes_when_any_field_changes() {
 }
 
 #[test]
+fn proposal_key_ignores_approved_by() {
+    let base_key = proposal_key(&base()).unwrap();
+
+    // A single recorded approval must not move the key.
+    let mut p = base();
+    p.approvedBy = vec![Address::repeat_byte(0x44)];
+    assert_eq!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "approvedBy must not influence the key",
+    );
+
+    // Neither must many, in any order — `approvedBy` is excluded entirely, so
+    // it isn't subject to the sorted/unique rules `approvers` is.
+    let mut p = base();
+    p.approvedBy = vec![
+        Address::repeat_byte(0x99),
+        Address::repeat_byte(0x11),
+        Address::repeat_byte(0x99),
+    ];
+    assert_eq!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "approvedBy contents must not influence the key",
+    );
+}
+
+#[test]
 fn proposal_key_errors_on_unsorted_approvers() {
     let mut p = base();
     p.approvers.reverse();
@@ -87,6 +116,7 @@ fn proposal_key_handles_zero_values() {
         creator: Address::ZERO,
         approvers: vec![],
         minApprovers: U256::ZERO,
+        approvedBy: vec![],
     };
     proposal_key(&p).unwrap();
 }
@@ -98,6 +128,7 @@ fn proposal_key_handles_max_values() {
         creator: Address::ZERO,
         approvers: vec![Address::repeat_byte(0xFF)],
         minApprovers: U256::from(1u64),
+        approvedBy: vec![],
     };
     proposal_key(&p).unwrap();
 }

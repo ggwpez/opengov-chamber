@@ -26,6 +26,7 @@ pub enum ProposalError {
     CreatorIsApprover,
     AlreadyApproved,
     ProposalNotFound,
+    NotAnApprover,
 }
 
 pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError> {
