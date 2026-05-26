@@ -1,10 +1,3 @@
-//! Minimal Substrate mock runtime to test the `my-token` PolkaVM contract via
-//! `pallet_revive::test_utils::builder::{bare_instantiate, bare_call}`.
-//!
-//! Layout: `frame_system + pallet_balances + pallet_timestamp + pallet_revive`.
-//! Anything pallet_revive's Config doesn't strictly need is omitted (no
-//! pallet_assets, no pallet_proxy, no pallet_utility, no pallet_transaction_payment).
-
 use frame_support::{construct_runtime, derive_impl, traits::ConstU32};
 use frame_system::EnsureSigned;
 use sp_runtime::{AccountId32, BuildStorage, traits::IdentityLookup};

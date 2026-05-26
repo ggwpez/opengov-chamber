@@ -1,7 +1,4 @@
-//! Deploys `my-token` into the pure-Rust pallet_revive mock runtime and
-//! exercises `mint` + `balanceOf` via `bare_instantiate` / `bare_call`.
-
-use my_token_tests::{Test, fund, new_test_ext, selector, RuntimeOrigin};
+use contract_tests::{Test, fund, new_test_ext, selector, RuntimeOrigin};
 use pallet_revive::{
     Code, TransactionLimits, Weight,
     test_utils::{
@@ -13,7 +10,7 @@ use sp_core::{H160, U256};
 
 /// Built by `cd ../contract && cargo build` (build.rs runs PvmBuilder).
 /// Lands in the shared `target/` thanks to `.cargo/config.toml`.
-const BLOB: &[u8] = include_bytes!("../../target/my-token.release.polkavm");
+const BLOB: &[u8] = include_bytes!("../../target/contract.release.polkavm");
 
 /// Generous limits so we don't trip the deposit cap on a 170KB blob.
 fn limits() -> TransactionLimits<Test> {

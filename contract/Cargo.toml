@@ -1,19 +1,19 @@
 [package]
-name = "my-token"
+name = "contract"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92"
 build = "build.rs"
 
 [[bin]]
-name = "my-token"
-path = "src/my-token.rs"
+name = "contract"
+path = "src/contract.rs"
 
 [dependencies]
-alloy-core = { version = "0.8", default-features = false, features = ["sol-types"] }
-pallet-revive-uapi = { version = "0.10", default-features = false }
+alloy-core = { version = "1.6", default-features = false, features = ["sol-types"] }
+pallet-revive-uapi = { version = "0.14", default-features = false }
 picoalloc = { version = "5", default-features = false }
-polkavm-derive = { version = "0.31.0" }
+polkavm-derive = { version = "0.33.0" }
 
 [build-dependencies]
 cargo-pvm-contract-builder = "0.3.0"

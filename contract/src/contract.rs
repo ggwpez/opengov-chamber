@@ -13,7 +13,7 @@ use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 extern crate alloc;
 use alloc::vec;
 
-sol!("MyToken.sol");
+sol!("Contract.sol");
 
 /// This is the constructor which is called once per contract.
 #[polkavm_derive::polkavm_export]
@@ -29,16 +29,16 @@ pub extern "C" fn call() {
     let selector: [u8; 4] = call_data[0..4].try_into().unwrap();
 
     match selector {
-        MyToken::balanceOfCall::SELECTOR => {
-            let balance_of_call = MyToken::balanceOfCall::abi_decode(&call_data, true)
+        Contract::balanceOfCall::SELECTOR => {
+            let balance_of_call = Contract::balanceOfCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode balanceOf call");
 
             let balance = get_balance(&balance_of_call.account.into_array());
             api::return_value(ReturnFlags::empty(), &balance.to_be_bytes::<32>());
         }
 
-        MyToken::mintCall::SELECTOR => {
-            let mint_call = MyToken::mintCall::abi_decode(&call_data, true)
+        Contract::mintCall::SELECTOR => {
+            let mint_call = Contract::mintCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode mint call");
 
             let new_recipient_balance =
@@ -51,13 +51,13 @@ pub extern "C" fn call() {
             emit_transfer(Address::ZERO, mint_call.to, mint_call.amount);
         }
 
-        MyToken::totalSupplyCall::SELECTOR => {
+        Contract::totalSupplyCall::SELECTOR => {
             let total_supply = get_total_supply();
             api::return_value(ReturnFlags::empty(), &total_supply.to_be_bytes::<32>());
         }
 
-        MyToken::transferCall::SELECTOR => {
-            let transfer_call = MyToken::transferCall::abi_decode(&call_data, true)
+        Contract::transferCall::SELECTOR => {
+            let transfer_call = Contract::transferCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode transfer call");
 
             let caller = get_caller();
@@ -142,9 +142,9 @@ fn set_balance(addr: &[u8; 20], amount: U256) {
 /// Emit a Transfer event
 #[inline]
 fn emit_transfer(from: Address, to: Address, value: U256) {
-    let event = MyToken::Transfer { from, to, value };
+    let event = Contract::Transfer { from, to, value };
     let topics = [
-        MyToken::Transfer::SIGNATURE_HASH.0,
+        Contract::Transfer::SIGNATURE_HASH.0,
         event.from.into_word().0,
         event.to.into_word().0,
     ];
@@ -155,8 +155,8 @@ fn emit_transfer(from: Address, to: Address, value: U256) {
 /// Revert with an InsufficientBalance error
 #[inline]
 fn revert_insufficient_balance() -> ! {
-    let error = MyToken::InsufficientBalance {};
-    let encoded_error = <MyToken::InsufficientBalance as SolError>::abi_encode(&error);
+    let error = Contract::InsufficientBalance {};
+    let encoded_error = <Contract::InsufficientBalance as SolError>::abi_encode(&error);
     api::return_value(ReturnFlags::REVERT, &encoded_error);
 }
 
