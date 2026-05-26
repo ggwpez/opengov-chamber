@@ -1,15 +1,15 @@
-use contract::{B256, Contract, sol_types::SolValue};
-use contract_tests::{Test, fund, new_test_ext, selector, RuntimeOrigin};
+use contract::{B256, Contract, sol_types::{SolCall, SolEvent, SolValue}};
+use contract_tests::{Test, fund, new_test_ext, RuntimeEvent, RuntimeOrigin, System};
 use pallet_revive::{
-    Code, TransactionLimits, Weight,
+    Code, H160, TransactionLimits, Weight,
     test_utils::{
         ALICE, ALICE_ADDR,
-        BOB, BOB_ADDR,
+        BOB_ADDR,
         builder::{BareCallBuilder, BareInstantiateBuilder},
     },
 };
-use sp_core::{H160, U256};
-use contract::Address;
+use pallet_revive_uapi::ReturnFlags;
+use contract::{Address, proposal_key};
 
 /// Built by `cd ../contract && cargo build` (build.rs runs PvmBuilder).
 /// Lands in the shared `target/` thanks to `.cargo/config.toml`.
@@ -23,37 +23,6 @@ fn limits() -> TransactionLimits<Test> {
     }
 }
 
-fn encode_address(addr: H160) -> Vec<u8> {
-    let mut out = vec![0u8; 12];
-    out.extend_from_slice(&addr.0);
-    out
-}
-
-fn encode_address_uint256(addr: H160, amount: U256) -> Vec<u8> {
-    let mut out = encode_address(addr);
-    out.extend_from_slice(&amount.to_big_endian());
-    out
-}
-
-fn encode_propose_args(call_hash: [u8; 32], approvers: &[H160], min_approvers: U256) -> Vec<u8> {
-    let mut out = Vec::new();
-    out.extend_from_slice(&call_hash);
-    out.extend_from_slice(&U256::from(0x60).to_big_endian());
-    out.extend_from_slice(&min_approvers.to_big_endian());
-    out.extend_from_slice(&U256::from(approvers.len() as u64).to_big_endian());
-    for a in approvers {
-        out.extend_from_slice(&encode_address(*a));
-    }
-    out
-}
-
-fn calldata(sig: &str, params: &[u8]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(4 + params.len());
-    data.extend_from_slice(&selector(sig));
-    data.extend_from_slice(params);
-    data
-}
-
 #[test]
 fn blob_size_is_sane() {
     let size = BLOB.len();
@@ -63,44 +32,118 @@ fn blob_size_is_sane() {
     eprintln!("blob size is sane: {}", size);
 }
 
-#[test]
-fn mint_then_balance_of_round_trip() {
-    new_test_ext().execute_with(|| {
-        fund(&ALICE, u64::MAX / 2);
-        let expected_proposal = Contract::Proposal {
+/// Fund ALICE, deploy the contract, and submit one proposal.
+///
+/// Returns the contract address and the proposal that was created.
+fn setup_with_proposal() -> (H160, Contract::Proposal) {
+    fund(&ALICE, u64::MAX / 2);
+    let expected_proposal = Contract::Proposal {
+        callHash: B256::repeat_byte(0xAA),
+        creator: Address::from(ALICE_ADDR.0),
+        approvers: vec![Address::from(BOB_ADDR.0)],
+        minApprovers: contract::U256::from(1u64),
+    };
+
+    let contract = BareInstantiateBuilder::<Test>::bare_instantiate(
+        RuntimeOrigin::signed(ALICE),
+        Code::Upload(BLOB.to_vec()),
+    )
+    .transaction_limits(limits())
+    .build_and_unwrap_contract();
+
+    // propose
+    let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), contract.addr)
+        .data(Contract::proposeCall {
             callHash: B256::repeat_byte(0xAA),
-            creator: Address::from(ALICE_ADDR.0),
             approvers: vec![Address::from(BOB_ADDR.0)],
             minApprovers: contract::U256::from(1u64),
-        };
-
-        let contract = BareInstantiateBuilder::<Test>::bare_instantiate(
-            RuntimeOrigin::signed(ALICE),
-            Code::Upload(BLOB.to_vec()),
-        )
+        }.abi_encode())
         .transaction_limits(limits())
-        .build_and_unwrap_contract();
+        .build_and_unwrap_result();
 
-        // propose
-        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), contract.addr)
-            .data(calldata(
-                "propose(bytes32,address[],uint256)",
-                &encode_propose_args([0xAA; 32], &[BOB_ADDR], U256::from(1u64)),
-            ))
+    (contract.addr, expected_proposal)
+}
+
+#[test]
+fn get_propose_works() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected_proposal) = setup_with_proposal();
+
+        // fetch specific proposal
+        let proposal_key = proposal_key(&expected_proposal).unwrap();
+        let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::proposalCall {
+                proposalHash: proposal_key.into(),
+            }.abi_encode())
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
+        let proposal = <Contract::Proposal>::abi_decode_validate(&proposal.data).unwrap();
+        assert_eq!(proposal, expected_proposal);
+    });
+}
+
+#[test]
+fn get_all_proposal_works() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected_proposal) = setup_with_proposal();
+
         // allProposals() → [expected_proposal]
-        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), contract.addr)
-            .data(calldata(
-                "allProposals()",
-                &[],
-            ))
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::allProposalsCall {}.abi_encode())
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
         let proposals = <Vec<Contract::Proposal>>::abi_decode_validate(&result.data).unwrap();
-        assert_eq!(proposals.len(), 1);
-        assert_eq!(proposals[0], expected_proposal);
+        assert_eq!(proposals, vec![expected_proposal]);
+    });
+}
+
+#[test]
+fn proposing_twice_errors() {
+    new_test_ext().execute_with(|| {
+        let (addr, _expected_proposal) = setup_with_proposal();
+
+        // propose again should revert
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::proposeCall {
+                callHash: B256::repeat_byte(0xAA),
+                approvers: vec![Address::from(BOB_ADDR.0)],
+                minApprovers: contract::U256::from(1u64),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+    });
+}
+
+#[test]
+fn propose_emits_event() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected_proposal) = setup_with_proposal();
+
+        // Find the `ContractEmitted` event our contract produced while proposing.
+        let (topics, data) = System::events()
+            .into_iter()
+            .find_map(|record| match record.event {
+                RuntimeEvent::Revive(pallet_revive::Event::ContractEmitted {
+                    contract,
+                    topics,
+                    data,
+                }) if contract == addr => Some((topics, data)),
+                _ => None,
+            })
+            .expect("propose should emit a ContractEmitted event");
+
+        // topic[0] is the event signature; topics[1..] are the indexed params.
+        assert_eq!(topics.len(), 4);
+        assert_eq!(topics[0].0, Contract::Proposed::SIGNATURE_HASH.0);
+        assert_eq!(topics[1].0, expected_proposal.callHash.0);
+        assert_eq!(topics[2].0, expected_proposal.creator.into_word().0);
+
+        // The only non-indexed field, `minApprovers`, lands in the data section.
+        assert_eq!(data, expected_proposal.minApprovers.to_be_bytes::<32>());
     });
 }

@@ -1375,6 +1375,7 @@ dependencies = [
  "frame-system",
  "pallet-balances",
  "pallet-revive",
+ "pallet-revive-uapi 0.1.0",
  "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",

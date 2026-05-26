@@ -10,6 +10,7 @@ publish = false
 # own workspace at /Users/vados/Documents/work/polkadot-sdk/Cargo.toml.
 [dependencies]
 pallet-revive    = { path = "../../polkadot-sdk/substrate/frame/revive" }
+pallet-revive-uapi = { path = "../../polkadot-sdk/substrate/frame/revive/uapi" }
 frame-support    = { path = "../../polkadot-sdk/substrate/frame/support" }
 frame-system     = { path = "../../polkadot-sdk/substrate/frame/system" }
 pallet-balances  = { path = "../../polkadot-sdk/substrate/frame/balances" }

@@ -1,7 +1,7 @@
 
 #[global_allocator]
-static mut ALLOC: picoalloc::Mutex<picoalloc::Allocator<picoalloc::ArrayPointer<1024>>> = {
-    static mut ARRAY: picoalloc::Array<1024> = picoalloc::Array([0u8; 1024]);
+static mut ALLOC: picoalloc::Mutex<picoalloc::Allocator<picoalloc::ArrayPointer<16384>>> = {
+    static mut ARRAY: picoalloc::Array<16384> = picoalloc::Array([0u8; 16384]);
 
     picoalloc::Mutex::new(picoalloc::Allocator::new(unsafe {
         picoalloc::ArrayPointer::new(&raw mut ARRAY)

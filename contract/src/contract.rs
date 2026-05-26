@@ -5,9 +5,9 @@ pub mod plumbing;
 
 use alloy_core::{
     primitives::{Address, FixedBytes},
-    sol_types::{SolCall, SolValue},
+    sol_types::{sol_data, EventTopic, SolCall, SolEvent, SolValue},
 };
-use contract::{Contract, proposal_key};
+use contract::{Contract, ProposalError, proposal_key};
 use pallet_revive_uapi::{HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
@@ -48,6 +48,9 @@ pub extern "C" fn call() {
                 api::return_value(ReturnFlags::REVERT, &[]);
             }
             set_proposal(&prop);
+            add_proposal_key(key);
+
+            events::proposed(&prop);
 
             api::return_value(ReturnFlags::empty(), &[]);
         }
@@ -55,6 +58,31 @@ pub extern "C" fn call() {
         Contract::allProposalsCall::SELECTOR => {
             let proposals = get_all_proposals();
             api::return_value(ReturnFlags::empty(), &proposals.abi_encode());
+        }
+
+        Contract::proposalCall::SELECTOR => {
+            let proposal_call = Contract::proposalCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode proposal call");
+            
+            let proposal = match get_proposal(&proposal_call.proposalHash) {
+                Some(p) => p,
+                None => api::return_value(ReturnFlags::REVERT, &[]),
+            };
+
+            api::return_value(ReturnFlags::empty(), &proposal.abi_encode());
+        }
+
+        Contract::approveCall::SELECTOR => {
+            let approve_call = Contract::approveCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode approve call");
+            
+            match approve_proposal(&approve_call.proposalHash) {
+                Ok(_) => (),
+                Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
+            };
+
+            events::approved(&approve_call.proposalHash);
+            api::return_value(ReturnFlags::empty(), &[]);
         }
 
         /*Contract::mintCall::SELECTOR => {
@@ -136,11 +164,29 @@ fn get_all_proposal_keys() -> Vec<[u8; 32]> {
         .unwrap_or_default()
 }
 
+fn add_proposal_key(key: [u8; 32]) {
+    let mut keys = get_all_proposal_keys();
+    keys.push(key);
+    set_all_proposal_keys(&keys);
+}
+
 fn get_all_proposals() -> Vec<Contract::Proposal> {
     get_all_proposal_keys()
         .iter()
         .filter_map(get_proposal)
         .collect()
+}
+
+fn approve_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
+    let mut proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
+    if proposal.approvers.contains(&get_caller()) {
+        return Err(ProposalError::AlreadyApproved);
+    }
+
+    proposal.approvers.push(get_caller());
+    set_proposal(&proposal);
+
+    Ok(())
 }
 
 /// Get totalSupply from storage
@@ -181,6 +227,37 @@ fn get_balance(addr: &[u8; 20]) -> U256 {
     let key = balance_key(addr);
     api::set_storage(StorageFlags::empty(), &key, &amount.to_be_bytes::<32>());
 }*/
+
+mod events {
+    use super::*;
+
+    pub fn proposed(prop: &Contract::Proposal) {
+        // `approvers` is an indexed dynamic array, so its topic is the keccak hash of
+        // the encoded elements rather than the array itself.
+        let approvers_topic =
+            <sol_data::Array<sol_data::Address> as EventTopic>::encode_topic(&prop.approvers);
+        let event = Contract::Proposed {
+            callHash: prop.callHash,
+            creator: prop.creator,
+            approvers: approvers_topic.0,
+            minApprovers: prop.minApprovers,
+        };
+        // 1 signature hash + 3 indexed params (`address[]` is hashed into its topic).
+        let topics = event.encode_topics_array::<4>().map(|t| t.0.0);
+        let data = event.encode_data();
+        api::deposit_event(&topics, &data);
+    }
+
+    pub fn approved(key: &[u8; 32]) {
+        let event = Contract::Approved {
+            proposalHash: key.into(),
+        };
+        // 1 signature hash + 1 indexed param.
+        let topics = event.encode_topics_array::<2>().map(|t| t.0.0);
+        let data = event.encode_data();
+        api::deposit_event(&topics, &data);
+    }
+}
 
 // Emit a Transfer event
 /*#[inline]
