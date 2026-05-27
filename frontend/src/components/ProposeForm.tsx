@@ -7,12 +7,14 @@ import { BaseError } from 'viem';
 import { contractAbi } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { paseoHub } from '@/lib/chain';
+import { useActiveAccount } from '@/lib/activeAccount';
 import { callHashFromHex, isAddress, isHash32, parseAddresses } from '@/lib/format';
 
 type Mode = 'hash' | 'bytes';
 
 export function ProposeForm() {
-  const { address, isConnected, chainId } = useAccount();
+  const { isConnected, chainId } = useAccount();
+  const { activeAddress: address } = useActiveAccount();
   const { switchChain, isPending: switching } = useSwitchChain();
   const queryClient = useQueryClient();
 
@@ -75,6 +77,9 @@ export function ProposeForm() {
     reset();
     writeContract(
       {
+        // Sign as the account the user picked in the connect modal, not just the
+        // wallet's primary account.
+        account: address,
         // Pin the target chain: wagmi asserts the wallet is on Paseo Hub and
         // throws ChainMismatchError rather than silently signing on whatever
         // network the wallet happens to be set to.

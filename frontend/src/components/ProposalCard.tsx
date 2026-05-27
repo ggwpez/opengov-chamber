@@ -9,9 +9,11 @@ import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
 import { shorten } from '@/lib/format';
+import { useActiveAccount } from '@/lib/activeAccount';
 
 export function ProposalCard({ proposal, index }: { proposal: Proposal; index: number }) {
-  const { address, isConnected } = useAccount();
+  const { isConnected } = useAccount();
+  const { activeAddress: address } = useActiveAccount();
   const queryClient = useQueryClient();
   const [action, setAction] = useState<'approve' | 'finalize' | null>(null);
 
@@ -35,12 +37,12 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
     const onSettled = { onSuccess: () => queryClient.invalidateQueries() };
     if (which === 'approve') {
       writeContract(
-        { address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'approve', args: [key] },
+        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'approve', args: [key] },
         onSettled,
       );
     } else {
       writeContract(
-        { address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'finalize', args: [key], value: FINALIZE_DEPOSIT },
+        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'finalize', args: [key], value: FINALIZE_DEPOSIT },
         onSettled,
       );
     }

@@ -504,6 +504,130 @@ a:hover {
   border-radius: 999px;
   padding: 7px 12px;
   color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+button.addr-pill:hover {
+  border-color: var(--magenta);
+  color: var(--magenta-ink);
+}
+
+/* connect / switch modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(5, 5, 9, 0.66);
+  backdrop-filter: blur(3px);
+  animation: fade-in 0.16s ease;
+}
+.modal {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 22px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: rise 0.2s ease;
+}
+.modal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.modal-head h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  margin: 0;
+}
+.modal-x {
+  background: transparent;
+  border: 0;
+  color: var(--faint);
+  font-size: 15px;
+  cursor: pointer;
+  line-height: 1;
+}
+.modal-x:hover {
+  color: var(--text);
+}
+.modal-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 18px 0 8px;
+}
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.picker-empty {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 12px 2px;
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.pick-row:hover:not(:disabled) {
+  border-color: var(--magenta);
+  background: var(--raised);
+}
+.pick-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.pick-row.is-default {
+  border-color: var(--magenta);
+  box-shadow: inset 0 0 0 1px var(--magenta);
+}
+.pick-main {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.pick-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+.pick-tag {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.pick-tag.default {
+  color: var(--magenta-ink);
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
 }
 
 .foot {
@@ -529,4 +653,13 @@ a:hover {
 }
 .rise {
   animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
