@@ -98,7 +98,12 @@ a:hover {
 
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  gap: 14px;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
   gap: 14px;
 }
 .brand .mark {
@@ -111,7 +116,7 @@ a:hover {
   color: var(--magenta-ink);
   font-style: normal;
 }
-.brand .net {
+.net {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--amber);
@@ -542,19 +547,22 @@ a:hover {
 .mono {
   font-family: var(--font-mono);
 }
+.addr-link {
+  color: var(--magenta-ink);
+  text-decoration: none;
+  border-bottom: 1px dotted color-mix(in srgb, var(--magenta-ink) 50%, transparent);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.addr-link:hover {
+  color: var(--magenta);
+  border-bottom-color: var(--magenta);
+}
 
 /* wallet pill */
 .wallet {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--mint);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mint) 22%, transparent);
 }
 .addr-pill {
   font-family: var(--font-mono);
