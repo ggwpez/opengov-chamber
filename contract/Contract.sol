@@ -20,11 +20,12 @@ interface Contract {
     event Proposed(bytes32 indexed callHash, address indexed creator, address[] indexed approvers, uint256 minApprovers);
     event Approved(bytes32 indexed proposalHash);
     event Finalized(bytes32 indexed proposalHash, bytes32 indexed callHash);
+    event Closed(bytes32 indexed proposalHash);
 
     error NotApproved();
-    // finalize() must be sent at least the referendum SubmissionDeposit as value,
-    // since the submit is dispatched as (and deposits from) the contract account.
     error InsufficientDeposit();
+    error ProposalNotFound();
+    error NotOwner();
 
     function allProposals() external view returns (Proposal[] memory);
     function proposal(bytes32 proposalHash) external view returns (Proposal memory);
@@ -32,4 +33,5 @@ interface Contract {
     function propose(bytes32 callHash, uint32 callLen, uint32 enactmentDelay, address[] memory approvers, uint256 minApprovers) external;
     function approve(bytes32 proposalHash) external;
     function finalize(bytes32 proposalHash) external payable;
+    function close(bytes32 proposalHash) external;
 }

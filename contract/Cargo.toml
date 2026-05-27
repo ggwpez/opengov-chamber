@@ -2,7 +2,6 @@
 name = "contract"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
 build = "build.rs"
 
 [lib]
@@ -14,14 +13,14 @@ name = "contract"
 path = "src/contract.rs"
 
 [dependencies]
-alloy-core = { version = "1.6", default-features = false, features = ["sol-types"] }
-pallet-revive-uapi = { version = "0.14", default-features = false }
-picoalloc = { version = "5", default-features = false }
-polkavm-derive = { version = "0.33.0" }
+alloy-core = { version = "*", default-features = false, features = ["sol-types"] }
+pallet-revive-uapi = { version = "*", default-features = false }
+picoalloc = { version = "*", default-features = false }
+polkavm-derive = { version = "*" }
 parity-scale-codec = { version = "*", default-features = false }
 
 [build-dependencies]
-cargo-pvm-contract-builder = "0.3.0"
+cargo-pvm-contract-builder = "*"
 
 [features]
 std = []

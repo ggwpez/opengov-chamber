@@ -555,6 +555,40 @@ fn finalize_below_threshold_reverts() {
 }
 
 #[test]
+fn finalize_by_non_owner_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected_proposal) = setup_with_proposal();
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // BOB approves, meeting `minApprovers: 1`, so the threshold check passes
+        // and finalize reaches the owner check.
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        // BOB is an approver but not the creator (ALICE is), so finalize reverts
+        // with `NotOwner`.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::finalizeCall {
+                proposalHash: key.into(),
+            }.abi_encode())
+            .native_value(SUBMISSION_DEPOSIT)
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        // Nothing was submitted.
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 0);
+    });
+}
+
+#[test]
 fn finalize_nonexistent_proposal_reverts() {
     new_test_ext().execute_with(|| {
         let (addr, _expected_proposal) = setup_with_proposal();

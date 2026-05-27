@@ -2,33 +2,22 @@
 name = "contract-tests"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.92"
 publish = false
 
-# These tests run the contract against the *real* Asset Hub Polkadot runtime
-# (pulled from git) rather than a hand-rolled mock. The polkadot-sdk pallets
-# below are pinned to the exact crates.io versions that runtime depends on, so
-# the types unify across the dependency graph.
-#
-# NOTE: building the runtime triggers its `substrate-wasm-builder` build script.
-# We only need the *native* runtime for `TestExternalities`, so `SKIP_WASM_BUILD=1`
-# is set in ../.cargo/config.toml to skip the (huge, unnecessary) wasm compile.
 [dependencies]
 asset-hub-polkadot-runtime = { git = "https://github.com/polkadot-fellows/runtimes", rev = "b13287a4dfe15f71bd55cd7b4ea4c319768e28ad", default-features = false, features = ["std"] }
 
-pallet-revive    = { version = "0.17.0" }
-# Must match the uapi version pallet-revive 0.17 depends on, so `ReturnFlags`
-# (the type of `ExecReturnValue.flags`) unifies.
-pallet-revive-uapi = { version = "0.13.0" }
-pallet-referenda = { version = "48.0.0" }
-pallet-preimage  = { version = "48.0.0" }
-xcm              = { version = "23.0.1", package = "staging-xcm" }
-frame-support    = { version = "47.0.0" }
-frame-system     = { version = "47.0.0" }
-pallet-balances  = { version = "49.0.0" }
-sp-core          = { version = "41.0.0" }
-sp-io            = { version = "46.0.0" }
-sp-runtime       = { version = "47.0.0" }
-codec            = { version = "3.7.5", package = "parity-scale-codec" }
-scale-info       = { version = "2.11.6" }
+pallet-revive    = { version = "*" }
+pallet-revive-uapi = { version = "*" }
+pallet-referenda = { version = "*" }
+pallet-preimage  = { version = "*" }
+xcm              = { version = "*", package = "staging-xcm" }
+frame-support    = { version = "*" }
+frame-system     = { version = "*" }
+pallet-balances  = { version = "*" }
+sp-core          = { version = "*" }
+sp-io            = { version = "*" }
+sp-runtime       = { version = "*" }
+codec            = { version = "*", package = "parity-scale-codec" }
+scale-info       = { version = "*" }
 contract         = { path = "../contract", features = ["std"] }

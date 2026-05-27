@@ -30,6 +30,7 @@ pub enum ProposalError {
     ProposalNotFound,
     NotAnApprover,
     NotApproved,
+    NotOwner,
 }
 
 pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError> {

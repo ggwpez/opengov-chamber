@@ -98,12 +98,6 @@ pub extern "C" fn call() {
                 Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
             };
 
-            // The XCM `Transact` dispatches `Referenda::submit` as this contract's
-            // own sovereign account, which must hold the referendum
-            // `SubmissionDeposit`. pallet-revive has already credited any value
-            // sent with this call to the contract account, so require it to cover
-            // the deposit. (On revert the transfer is rolled back, refunding the
-            // caller.)
             let mut value_buf = [0u8; 32];
             api::value_transferred(&mut value_buf);
             let value = U256::from_le_bytes::<32>(value_buf);
@@ -141,49 +135,19 @@ pub extern "C" fn call() {
             api::return_value(ReturnFlags::empty(), &[]);
         }
 
-        /*Contract::mintCall::SELECTOR => {
-            let mint_call = Contract::mintCall::abi_decode_validate(&call_data)
-                .expect("Failed to decode mint call");
+        Contract::closeCall::SELECTOR => {
+            let close_call = Contract::closeCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode close call");
 
-            let new_recipient_balance =
-                get_balance(&mint_call.to.into_array()).saturating_add(mint_call.amount);
-            set_balance(&mint_call.to.into_array(), new_recipient_balance);
+            match close_proposal(&close_call.proposalHash) {
+                Ok(()) => (),
+                Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
+            };
 
-            let new_supply = get_total_supply().saturating_add(mint_call.amount);
-            set_total_supply(new_supply);
+            events::closed(&close_call.proposalHash);
 
-            emit_transfer(Address::ZERO, mint_call.to, mint_call.amount);
+            api::return_value(ReturnFlags::empty(), &[]);
         }
-
-        Contract::totalSupplyCall::SELECTOR => {
-            let total_supply = get_total_supply();
-            api::return_value(ReturnFlags::empty(), &total_supply.to_be_bytes::<32>());
-        }
-
-        Contract::transferCall::SELECTOR => {
-            let transfer_call = Contract::transferCall::abi_decode_validate(&call_data)
-                .expect("Failed to decode transfer call");
-
-            let caller = get_caller();
-            let sender_balance = get_balance(&caller);
-
-            if sender_balance < transfer_call.amount {
-                revert_insufficient_balance();
-            }
-
-            let new_sender_balance = sender_balance - transfer_call.amount;
-
-            let recipient_balance = get_balance(&transfer_call.to.into_array());
-            let new_recipient_balance = recipient_balance + transfer_call.amount;
-
-            set_balance(&caller, new_sender_balance);
-            set_balance(&transfer_call.to.into_array(), new_recipient_balance);
-            emit_transfer(
-                Address::from(caller),
-                transfer_call.to,
-                transfer_call.amount,
-            );
-        }*/
 
         _ => panic!("Unknown function selector"),
     }
@@ -226,6 +190,12 @@ fn add_proposal_key(key: [u8; 32]) {
     set_all_proposal_keys(&keys);
 }
 
+fn remove_proposal_key(key: [u8; 32]) {
+    let mut keys = get_all_proposal_keys();
+    keys.retain(|k| k != &key);
+    set_all_proposal_keys(&keys);
+}
+
 fn get_all_proposals() -> Vec<Contract::Proposal> {
     get_all_proposal_keys()
         .iter()
@@ -259,47 +229,26 @@ fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError
         return Err(ProposalError::NotApproved);
     }
 
+    // only by the creator
+    if proposal.creator != get_caller() {
+        return Err(ProposalError::NotOwner);
+    }
+
     Ok(proposal)
 }
 
-/// Get totalSupply from storage
-/*fn get_total_supply() -> U256 {
-    let key = total_supply_key();
-    let mut supply_bytes = vec![0u8; 32];
-    let mut supply_output = supply_bytes.as_mut_slice();
+fn close_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
+    let proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
 
-    match api::get_storage(StorageFlags::empty(), &key, &mut supply_output) {
-        Ok(_) => U256::from_be_bytes::<32>(supply_output[0..32].try_into().unwrap()),
-        Err(_) => U256::ZERO,
+    if proposal.creator != get_caller() {
+        return Err(ProposalError::NotOwner);
     }
-}*/
 
-/// Set totalSupply in storage
-/*#[inline]
-fn set_total_supply(amount: U256) {
-    let key = total_supply_key();
-    api::set_storage(StorageFlags::empty(), &key, &amount.to_be_bytes::<32>());
-}*/
+    api::set_storage_or_clear(StorageFlags::empty(), &key, &[0u8; 32]);
+    remove_proposal_key(*key);
 
-/// Get the balance for a given address from storage
-/*#[inline]
-fn get_balance(addr: &[u8; 20]) -> U256 {
-    let key = balance_key(addr);
-    let mut balance_bytes = vec![0u8; 32];
-    let mut balance_output = balance_bytes.as_mut_slice();
-
-    match api::get_storage(StorageFlags::empty(), &key, &mut balance_output) {
-        Ok(_) => U256::from_be_bytes::<32>(balance_output[0..32].try_into().unwrap()),
-        Err(_) => U256::ZERO,
-    }
-}*/
-
-/// Set the balance for a given address in storage
-/*#[inline]
-{fn }set_balance(addr: &[u8; 20], amount: U256) {
-    let key = balance_key(addr);
-    api::set_storage(StorageFlags::empty(), &key, &amount.to_be_bytes::<32>());
-}*/
+    Ok(())
+}
 
 mod events {
     use super::*;
@@ -341,6 +290,16 @@ mod events {
         let data = event.encode_data();
         api::deposit_event(&topics, &data);
     }
+
+    pub fn closed(key: &[u8; 32]) {
+        let event = Contract::Closed {
+            proposalHash: key.into(),
+        };
+        // 1 signature hash + 1 indexed param.
+        let topics = event.encode_topics_array::<2>().map(|t| t.0.0);
+        let data = event.encode_data();
+        api::deposit_event(&topics, &data);
+    }
 }
 
 /// Revert with the `NotApproved` Solidity error.
@@ -358,26 +317,6 @@ fn revert_insufficient_deposit() -> ! {
     let encoded_error = <Contract::InsufficientDeposit as SolError>::abi_encode(&error);
     api::return_value(ReturnFlags::REVERT, &encoded_error);
 }
-
-// Emit a Transfer event
-/*#[inline]
-fn emit_transfer(from: Address, to: Address, value: U256) {
-    let event = Contract::Transfer { from, to, value };
-    let topics = [
-        Contract::Transfer::SIGNATURE_HASH.0,
-        event.from.into_word().0,
-        event.to.into_word().0,
-    ];
-    let data = event.value.to_be_bytes::<32>();
-    api::deposit_event(&topics, &data);
-}*/
-
-/*#[inline]
-fn revert_insufficient_balance() -> ! {
-    let error = Contract::InsufficientBalance {};
-    let encoded_error = <Contract::InsufficientBalance as SolError>::abi_encode(&error);
-    api::return_value(ReturnFlags::REVERT, &encoded_error);
-}*/
 
 /// Get the caller's address
 #[inline]
