@@ -1,5 +1,8 @@
 use contract::{B256, Contract, sol_types::{SolCall, SolError, SolEvent, SolValue}};
-use contract_tests::{Balances, ENDOWMENT, RuntimeEvent, RuntimeOrigin, System, Test, fund, new_test_ext};
+use contract_tests::{
+    Balances, ConvictionVoting, ENDOWMENT, Referenda, RuntimeEvent, RuntimeOrigin, System, Test,
+    fund, new_test_ext, roll_relay_until, set_relay_block,
+};
 use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
     test_utils::{
@@ -1033,5 +1036,140 @@ fn refund_reverts_and_preserves_tally_when_contract_is_short() {
             tally_before,
             "a failed refund must restore the tally, never lose the user's deposit",
         );
+    });
+}
+
+// --------------------------------------------------- full deposit round-trip
+//
+// The refund tests above stub out the hard part: `refund_pays_caller_and_zeroes_tally`
+// tops the contract up by hand because a real `finalize` immediately reserves the
+// SubmissionDeposit into the referendum, leaving the contract too poor to pay anyone
+// back. The test below closes that loop *properly* — it runs the live OpenGov
+// machinery so the deposit comes back on its own:
+//
+//   propose ─ approve ─ finalize ──▶ referendum submitted, deposit reserved on the
+//                                    contract's sovereign account
+//        ─ place_decision_deposit + aye vote ─ roll the (mocked) relay clock so the
+//          scheduler fires the referendum's alarms ──▶ Approved
+//        ─ refund_submission_deposit ──▶ deposit returns to the contract
+//        ─ contract.refund() ──▶ the original payer is made whole
+//
+// The only thing seeded into the contract is its existential deposit (orders of
+// magnitude below the SubmissionDeposit, and explicitly excluded as a funding source
+// by the `contract_free < SUBMISSION_DEPOSIT` precondition), so the money ALICE gets
+// back can *only* be the deposit the referendum returned.
+
+/// A whole proposal → passed referendum → deposit-returned → refunded round-trip,
+/// with no artificial top-up of the deposit.
+#[test]
+fn full_cycle_refund_from_passed_referendum() {
+    use frame_support::traits::fungible::Inspect;
+    use pallet_conviction_voting::{AccountVote, Conviction, Vote};
+    use pallet_referenda::{ReferendumInfo, ReferendumInfoFor};
+    use pallet_revive::AddressMapper;
+
+    new_test_ext().execute_with(|| {
+        // A voter that dominates total issuance, so a single aye clears the
+        // whitelisted_caller track's support bar (support = aye capital / active
+        // issuance; ALICE and BOB hold ENDOWMENT each, the voter holds 10x → ~83%).
+        let voter: sp_runtime::AccountId32 = [9u8; 32].into();
+        let voter_stake = ENDOWMENT * 10;
+        fund(&BOB, ENDOWMENT);
+        fund(&voter, voter_stake);
+
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+        let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
+
+        // The contract is deliberately NOT topped up. After finalize its free balance
+        // is ~0 (the deposit is reserved by the referendum), and the final `refund()`
+        // drains it back to zero — pallet-revive lets a contract account hit zero free
+        // balance (it's kept alive by its code, not an existential deposit). So the
+        // funds ALICE gets back can only be the deposit the referendum returned.
+
+        // Park governance time at a clean, non-zero relay block before submitting.
+        set_relay_block(10);
+
+        // approve + finalize → referendum 0 is submitted, reserving the
+        // SubmissionDeposit against the contract's own sovereign account.
+        approve_by_bob(addr, key);
+        assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 1);
+
+        // The reserved deposit is held against the *contract*, not ALICE — this is
+        // what makes the round-trip return to the contract later.
+        match ReferendumInfoFor::<Test>::get(0).expect("referendum 0 exists") {
+            ReferendumInfo::Ongoing(status) => {
+                assert_eq!(status.submission_deposit.who, contract_acct);
+                assert_eq!(status.submission_deposit.amount, SUBMISSION_DEPOSIT);
+            }
+            other => panic!("expected an ongoing referendum, got {other:?}"),
+        }
+
+        // Place the decision deposit (so it can leave Preparing) and vote aye with
+        // the dominant stake (approval = 100%, support ≈ 83%).
+        Referenda::place_decision_deposit(RuntimeOrigin::signed(ALICE), 0)
+            .expect("place_decision_deposit");
+        ConvictionVoting::vote(
+            RuntimeOrigin::signed(voter),
+            0,
+            AccountVote::Standard {
+                vote: Vote { aye: true, conviction: Conviction::Locked1x },
+                balance: voter_stake,
+            },
+        )
+        .expect("vote");
+
+        // Advance the relay clock (running the scheduler each block) until the
+        // referendum's alarms — at prepare-end then confirm-end — carry it to
+        // Approved.
+        roll_relay_until(
+            || matches!(ReferendumInfoFor::<Test>::get(0), Some(ReferendumInfo::Approved(..))),
+            10_000,
+        );
+
+        // Honesty precondition: the contract can't fund the refund itself — its free
+        // balance (only the seeded ED) is below what it owes; the deposit is still
+        // reserved by the referendum.
+        let contract_free_before = Balances::balance(&contract_acct);
+        assert!(
+            contract_free_before < SUBMISSION_DEPOSIT,
+            "contract must not be able to self-fund the refund (free {contract_free_before})",
+        );
+
+        // The deposit comes back to the contract (its sovereign account was the
+        // depositor), not to whoever calls the extrinsic.
+        Referenda::refund_submission_deposit(RuntimeOrigin::signed(ALICE), 0)
+            .expect("refund_submission_deposit");
+        assert_eq!(
+            Balances::balance(&contract_acct),
+            contract_free_before + SUBMISSION_DEPOSIT,
+            "the returned SubmissionDeposit must land in the contract",
+        );
+        // ...and the referendum no longer holds it.
+        assert!(
+            matches!(
+                ReferendumInfoFor::<Test>::get(0),
+                Some(ReferendumInfo::Approved(_, None, _)),
+            ),
+            "submission deposit should read as refunded on the referendum",
+        );
+
+        // Finally the original payer reclaims it via the contract — funded entirely
+        // by the deposit that just came back.
+        let alice_before = Balances::balance(&ALICE);
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::refundCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        // ALICE is made whole for the SubmissionDeposit (plus the storage deposit
+        // reclaimed by clearing her now-empty tally — hence "at least").
+        assert!(
+            Balances::balance(&ALICE) >= alice_before + SUBMISSION_DEPOSIT,
+            "the original payer must get the full SubmissionDeposit back",
+        );
+        assert_eq!(deposit_of(addr, Address::from(ALICE_ADDR.0)), U256::ZERO);
     });
 }

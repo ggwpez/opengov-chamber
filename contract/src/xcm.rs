@@ -66,13 +66,17 @@ pub mod referendum {
 
     // --- Placeholders (see the module-level warning) ------------------------
 
-    /// TODO(placeholder): fallback weight for the inner `submit` call.
-    const FALLBACK_REF_TIME: u64 = 2_000_000_000;
-    const FALLBACK_PROOF_SIZE: u64 = 200_000;
+    /// TODO(placeholder): fallback weight for the inner `submit` call. Set to
+    /// roughly 5x the real `Referenda::submit` weight on Asset Hub (~204M
+    /// ref_time / 42k proof_size); see `tests/tests/xcm.rs`.
+    const FALLBACK_REF_TIME: u64 = 1_000_000_000;
+    const FALLBACK_PROOF_SIZE: u64 = 210_000;
     /// TODO(placeholder): weight granted to the local XCM execution. Ideally this
     /// should be obtained from `IXcm.weighMessage(message)` rather than hardcoded.
-    pub const XCM_EXEC_REF_TIME: u64 = 4_000_000_000;
-    pub const XCM_EXEC_PROOF_SIZE: u64 = 400_000;
+    /// Set to roughly 5x the runtime weigher's figure for this message (~210M
+    /// ref_time / 42k proof_size); see `tests/tests/xcm.rs`.
+    pub const XCM_EXEC_REF_TIME: u64 = 1_100_000_000;
+    pub const XCM_EXEC_PROOF_SIZE: u64 = 220_000;
 
     /// SCALE-encode `RuntimeCall::Referenda(submit { .. })` referencing `call_hash`
     /// as a preimage lookup.

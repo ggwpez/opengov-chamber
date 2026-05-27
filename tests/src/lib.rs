@@ -5,10 +5,13 @@
 //! it — including the `XcmPrecompile` that `finalize()` dispatches through.
 
 pub use asset_hub_polkadot_runtime::{
-    Balances, Runtime as Test, RuntimeEvent, RuntimeGenesisConfig, RuntimeOrigin, System,
+    Balances, ConvictionVoting, Referenda, Runtime as Test, RuntimeEvent, RuntimeGenesisConfig,
+    RuntimeOrigin, Scheduler, System,
 };
 
-use sp_runtime::{AccountId32, BuildStorage};
+use cumulus_pallet_parachain_system::RelaychainDataProvider;
+use frame_support::traits::OnInitialize;
+use sp_runtime::{traits::BlockNumberProvider, AccountId32, BuildStorage};
 
 /// Native balance type of Asset Hub (DOT has 10 decimals).
 pub type Balance = <Test as pallet_balances::Config>::Balance;
@@ -35,6 +38,46 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 pub fn fund(who: &AccountId32, amount: Balance) {
     use frame_support::traits::fungible::Mutate;
     let _ = <Balances as Mutate<AccountId32>>::set_balance(who, amount);
+}
+
+/// Relay-chain block number — the clock governance actually runs on.
+pub type RelayBlockNumber = u32;
+
+/// Mock the relay-chain block number that the governance pallets read.
+///
+/// On Asset Hub, `pallet_referenda`, `pallet_scheduler`, and
+/// `pallet_conviction_voting` are all configured with
+/// `BlockNumberProvider = RelaychainDataProvider` — they track the *relay* block,
+/// not the parachain's `System` block. `set_block_number` is available here only
+/// because the runtime is built with `std`. Use inside `execute_with`.
+pub fn set_relay_block(n: RelayBlockNumber) {
+    RelaychainDataProvider::<Test>::set_block_number(n);
+}
+
+/// The current mocked relay-chain block number.
+pub fn relay_block() -> RelayBlockNumber {
+    RelaychainDataProvider::<Test>::current_block_number()
+}
+
+/// Drive governance time forward until `cond` holds.
+///
+/// `pallet_referenda` has no `on_initialize`; a referendum only advances when the
+/// scheduler fires the `nudge_referendum` alarm it set, and the scheduler services
+/// its agenda at the *relay* block number. So we bump the relay block one at a time
+/// and run the scheduler each step. Stepping by one keeps the scheduler's
+/// `IncompleteSince` cursor continuous, so no alarm is ever skipped. Panics if
+/// `cond` is still false after `max` blocks.
+pub fn roll_relay_until(mut cond: impl FnMut() -> bool, max: RelayBlockNumber) {
+    for _ in 0..max {
+        if cond() {
+            return;
+        }
+        set_relay_block(relay_block() + 1);
+        // This scheduler ignores the argument and reads "now" from the relay
+        // `BlockNumberProvider`; the value passed is irrelevant.
+        Scheduler::on_initialize(System::block_number());
+    }
+    assert!(cond(), "referendum condition not met within {max} relay blocks");
 }
 
 /// Solidity 4-byte selector: first 4 bytes of `keccak256(signature)`.

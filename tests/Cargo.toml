@@ -11,7 +11,10 @@ pallet-revive    = { version = "*" }
 pallet-revive-uapi = { version = "*" }
 pallet-referenda = { version = "*" }
 pallet-preimage  = { version = "*" }
+pallet-conviction-voting = { version = "*" }
+cumulus-pallet-parachain-system = { version = "*" }
 xcm              = { version = "*", package = "staging-xcm" }
+xcm-executor     = { version = "*", package = "staging-xcm-executor" }
 frame-support    = { version = "*" }
 frame-system     = { version = "*" }
 pallet-balances  = { version = "*" }

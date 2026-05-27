@@ -13,6 +13,7 @@ use asset_hub_polkadot_runtime::{
 use codec::{Decode, Encode};
 use contract::xcm::{IXcm, referendum};
 use contract::sol_types::SolCall;
+use contract_tests::Test;
 use frame_support::traits::{Bounded, schedule::DispatchTime};
 use sp_core::H256;
 use xcm::{VersionedXcm, v5::prelude::*};
@@ -113,5 +114,84 @@ fn execute_calldata_wraps_submit_call_in_transact() {
             );
         }
         other => panic!("expected a Transact instruction, got {:?}", other),
+    }
+}
+
+/// Multiple by which the contract's hardcoded weights are allowed to exceed the
+/// weight they must cover. Over-estimating is fine (and required — see below),
+/// but a blowout this large almost certainly means a constant was fat-fingered
+/// (e.g. a wrong unit), so we flag it. The placeholders target ~5x the real
+/// cost, so 10x leaves headroom for tuning/weight drift without going slack.
+const MAX_WEIGHT_HEADROOM: u64 = 10;
+
+/// Assert `granted` covers `need` on both dimensions, by at least 1x and at most
+/// [`MAX_WEIGHT_HEADROOM`]x. `need` is the real runtime figure; `granted` is what
+/// the contract hardcodes.
+fn assert_covers(label: &str, granted: Weight, need: Weight) {
+    for (dim, g, n) in [
+        ("ref_time", granted.ref_time(), need.ref_time()),
+        ("proof_size", granted.proof_size(), need.proof_size()),
+    ] {
+        assert!(
+            g >= n,
+            "{label} {dim} ({g}) is below the runtime's required {n}; \
+             the dispatch would run out of weight",
+        );
+        assert!(
+            g <= n.saturating_mul(MAX_WEIGHT_HEADROOM),
+            "{label} {dim} ({g}) over-estimates the runtime's {n} by more than \
+             {MAX_WEIGHT_HEADROOM}x — likely a wrong constant in xcm.rs",
+        );
+    }
+}
+
+/// The contract grants two weights it can't read from the runtime at execution
+/// time, so they're hardcoded in `xcm.rs`. Neither has to be *exact* (unlike the
+/// pallet indices or the deposit) — a comfortable over-estimate is the intended
+/// behaviour — but each MUST cover the real cost, or the dispatch fails with
+/// `WeightLimitReached`/`Overweight`. We pull both out of the *actual* calldata
+/// the contract emits (not the consts) so this tests what really gets dispatched.
+#[test]
+fn hardcoded_weights_cover_runtime_cost_with_bounded_headroom() {
+    use pallet_referenda::WeightInfo;
+    use asset_hub_polkadot_runtime::xcm_config::XcmConfig;
+    use xcm_executor::{Config, traits::WeightBounds};
+
+    let calldata = referendum::build_execute_calldata(&[0xAA; 32], PREIMAGE_LEN, ENACTMENT_DELAY);
+    let decoded = IXcm::executeCall::abi_decode_validate(&calldata)
+        .expect("build_execute_calldata must produce valid IXcm.execute calldata");
+
+    // (1) The weight handed to the whole local XCM execution (`IXcm.execute`'s
+    // arg) must cover what the runtime's own XCM weigher charges for this exact
+    // message — the authority on what `execute()` needs. Decode as
+    // `Xcm<RuntimeCall>` so the weigher can decode the Transact's inner call and
+    // bill its real dispatch weight, then weigh it with the runtime's configured
+    // `Weigher` (the same `xcm.rs` TODO suggests doing this via `weighMessage`).
+    let message: Vec<u8> = decoded.message.to_vec();
+    let mut xcm: Xcm<RuntimeCall> = VersionedXcm::<RuntimeCall>::decode(&mut &message[..])
+        .expect("message must decode as VersionedXcm")
+        .try_into()
+        .expect("message must be a supported XCM version");
+    let needed = <XcmConfig as Config>::Weigher::weight(&mut xcm, Weight::MAX)
+        .expect("the runtime must be able to weigh the contract's XCM message");
+    let granted = Weight::from_parts(decoded.weight.refTime, decoded.weight.proofSize);
+    assert_covers("XCM execution weight", granted, needed);
+
+    // (2) The inner Transact's `fallback_max_weight` — the weight assumed for the
+    // dispatched call when it can't be decoded — must cover the real
+    // `Referenda::submit` weight from the runtime's configured `WeightInfo`.
+    let submit = <Test as pallet_referenda::Config>::WeightInfo::submit();
+    let VersionedXcm::V5(xcm) = VersionedXcm::<()>::decode(&mut &message[..])
+        .expect("message must decode as VersionedXcm")
+    else {
+        panic!("expected XCM v5");
+    };
+    match &xcm.0[0] {
+        Instruction::Transact { fallback_max_weight, .. } => {
+            let fallback =
+                fallback_max_weight.expect("contract sets fallback_max_weight: Some(..)");
+            assert_covers("Transact fallback_max_weight", fallback, submit);
+        }
+        other => panic!("expected a Transact instruction, got {other:?}"),
     }
 }

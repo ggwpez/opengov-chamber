@@ -1836,9 +1836,11 @@ version = "0.1.0"
 dependencies = [
  "asset-hub-polkadot-runtime",
  "contract",
+ "cumulus-pallet-parachain-system",
  "frame-support",
  "frame-system",
  "pallet-balances",
+ "pallet-conviction-voting",
  "pallet-preimage",
  "pallet-referenda",
  "pallet-revive",
@@ -1849,6 +1851,7 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "staging-xcm",
+ "staging-xcm-executor",
 ]
 
 [[package]]
