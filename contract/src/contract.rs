@@ -4,7 +4,7 @@
 pub mod plumbing;
 
 use alloy_core::{
-    primitives::{Address, FixedBytes, U256},
+    primitives::{keccak256, Address, FixedBytes, U256},
     sol_types::{sol_data, EventTopic, SolCall, SolError, SolEvent, SolValue},
 };
 use contract::{Contract, ProposalError, proposal_key, xcm};
@@ -108,6 +108,9 @@ pub extern "C" fn call() {
                 revert_insufficient_deposit();
             }
 
+            // Tally the funds sent against the depositor so they can later `refund`.
+            increase_deposit(&get_caller(), value);
+
             // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
             // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
             // under this contract's signed origin.
@@ -132,6 +135,25 @@ pub extern "C" fn call() {
 
             events::finalized(&finalize_call.proposalHash, &proposal.callHash);
 
+            api::return_value(ReturnFlags::empty(), &[]);
+        }
+
+        Contract::depositsCall::SELECTOR => {
+            let deposits_call = Contract::depositsCall::abi_decode_validate(&call_data)
+                .expect("Failed to decode deposits call");
+
+            let balance = get_deposit(&deposits_call.depositor);
+            api::return_value(ReturnFlags::empty(), &balance.abi_encode());
+        }
+
+        Contract::refundCall::SELECTOR => {
+            let caller = get_caller();
+            let refunded = match refund(&caller) {
+                Ok(amount) => amount,
+                Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
+            };
+
+            events::refunded(&caller, refunded);
             api::return_value(ReturnFlags::empty(), &[]);
         }
 
@@ -237,6 +259,65 @@ fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError
     Ok(proposal)
 }
 
+/// Storage key for a depositor's running tally: `keccak256("deposit:" ++ addr)`.
+fn deposit_key(addr: &Address) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(8 + 20);
+    buf.extend_from_slice(b"deposit:");
+    buf.extend_from_slice(addr.as_slice());
+    keccak256(&buf).0
+}
+
+fn get_deposit(addr: &Address) -> U256 {
+    let key = deposit_key(addr);
+    let mut buf = [0u8; 32];
+    // Paired with `set_storage_or_clear`: the fixed-256-bit access path, which
+    // fills `buf` with zeros for a missing (e.g. cleared/refunded) entry.
+    api::get_storage_or_zero(StorageFlags::empty(), &key, &mut buf);
+    U256::from_le_bytes::<32>(buf)
+}
+
+fn set_deposit(addr: &Address, amount: U256) {
+    let key = deposit_key(addr);
+    // `set_storage_or_clear` removes the entry when the value is all-zero, so a
+    // fully-refunded depositor reclaims their storage deposit rather than leaving
+    // a zeroed slot behind.
+    api::set_storage_or_clear(StorageFlags::empty(), &key, &amount.to_le_bytes::<32>());
+}
+
+fn increase_deposit(addr: &Address, amount: U256) {
+    set_deposit(addr, get_deposit(addr).saturating_add(amount));
+}
+
+/// Refund the entirety of `addr`'s recorded deposit back to `addr`, returning the
+/// amount sent.
+///
+/// The tally is zeroed *before* the transfer (checks-effects-interactions), so a
+/// re-entrant call sees a zero balance and cannot double-withdraw. Crucially, the
+/// transfer can fail (e.g. the contract is short on native funds) — when it does
+/// we return `Err`, the caller reverts the whole call, and that rollback restores
+/// the tally we just zeroed. So a failed refund moves no funds and loses no
+/// deposit: it is a complete no-op.
+fn refund(addr: &Address) -> Result<U256, ()> {
+    let balance = get_deposit(addr);
+    set_deposit(addr, U256::ZERO);
+
+    let res = api::call(
+        CallFlags::empty(),
+        &addr.0.0,
+        u64::MAX,       // ref_time limit: use all available
+        u64::MAX,       // proof_size limit: use all available
+        &[u8::MAX; 32], // no storage deposit limit
+        &balance.to_le_bytes::<32>(),
+        &[],
+        None,
+    );
+    if res.is_err() {
+        return Err(());
+    }
+
+    Ok(balance)
+}
+
 fn close_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
     let proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
 
@@ -287,6 +368,14 @@ mod events {
         };
         // 1 signature hash + 2 indexed params.
         let topics = event.encode_topics_array::<3>().map(|t| t.0.0);
+        let data = event.encode_data();
+        api::deposit_event(&topics, &data);
+    }
+
+    pub fn refunded(to: &Address, amount: U256) {
+        let event = Contract::Refunded { to: *to, amount };
+        // 1 signature hash + 1 indexed param.
+        let topics = event.encode_topics_array::<2>().map(|t| t.0.0);
         let data = event.encode_data();
         api::deposit_event(&topics, &data);
     }

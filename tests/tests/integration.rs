@@ -10,7 +10,7 @@ use pallet_revive::{
     },
 };
 use pallet_revive_uapi::ReturnFlags;
-use contract::{Address, proposal_key, xcm::referendum::SUBMISSION_DEPOSIT};
+use contract::{Address, U256, proposal_key, xcm::referendum::{SUBMISSION_DEPOSIT, NATIVE_TO_ETH_RATIO}};
 
 /// Built by `cd ../contract && cargo build` (build.rs runs PvmBuilder).
 /// Lands in the shared `target/` thanks to `.cargo/config.toml`.
@@ -388,10 +388,11 @@ fn finalize_submits_referendum() {
         // The deposit really left the caller (this is the contrast that makes
         // `finalize_without_deposit_reverts`'s "balance unchanged" meaningful): it
         // funded the deposit now held against the contract's sovereign account.
-        assert_eq!(
-            Balances::balance(&ALICE),
-            alice_before - SUBMISSION_DEPOSIT,
-            "successful finalize must debit the caller by the SubmissionDeposit",
+        // The caller is debited the SubmissionDeposit *plus* a small storage deposit
+        // for recording their refundable tally, so we assert "at least".
+        assert!(
+            Balances::balance(&ALICE) <= alice_before - SUBMISSION_DEPOSIT,
+            "successful finalize must debit the caller by at least the SubmissionDeposit",
         );
 
         // Exactly one referendum now exists, and its proposal is the preimage
@@ -603,5 +604,133 @@ fn finalize_nonexistent_proposal_reverts() {
 
         assert_eq!(result.flags, ReturnFlags::REVERT);
         assert!(result.data.is_empty());
+    });
+}
+
+/// Read a depositor's recorded tally via the `deposits(address)` view.
+fn deposit_of(addr: H160, depositor: Address) -> U256 {
+    let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+        .data(Contract::depositsCall { depositor }.abi_encode())
+        .transaction_limits(limits())
+        .build_and_unwrap_result();
+    assert_eq!(result.flags, ReturnFlags::empty());
+    <U256 as SolValue>::abi_decode_validate(&result.data).unwrap()
+}
+
+/// Approve (BOB) and finalize (ALICE) the proposal, attaching `SUBMISSION_DEPOSIT`
+/// as value. Returns the contract address.
+fn approved_and_finalized() -> H160 {
+    fund(&BOB, ENDOWMENT);
+    let (addr, expected_proposal) = setup_with_proposal();
+    let key = proposal_key(&expected_proposal).unwrap();
+
+    let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+        .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+        .transaction_limits(limits())
+        .build_and_unwrap_result();
+
+    let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+        .data(Contract::finalizeCall { proposalHash: key.into() }.abi_encode())
+        .native_value(SUBMISSION_DEPOSIT)
+        .transaction_limits(limits())
+        .build_and_unwrap_result();
+    assert_eq!(result.flags, ReturnFlags::empty());
+
+    addr
+}
+
+/// A successful `finalize` tallies the attached value against the caller. The
+/// tally is EVM-denominated, so it's `SUBMISSION_DEPOSIT * NATIVE_TO_ETH_RATIO`.
+#[test]
+fn finalize_records_deposit() {
+    new_test_ext().execute_with(|| {
+        let addr = approved_and_finalized();
+
+        let expected = U256::from(SUBMISSION_DEPOSIT) * U256::from(NATIVE_TO_ETH_RATIO);
+        assert_eq!(deposit_of(addr, Address::from(ALICE_ADDR.0)), expected);
+    });
+}
+
+/// When the contract *does* hold the funds, `refund()` pays the caller back their
+/// whole tally and zeroes it. We top the contract up directly (a real `finalize`
+/// immediately spends the deposit into the referendum — see
+/// `refund_reverts_and_preserves_tally_when_contract_is_short`).
+#[test]
+fn refund_pays_caller_and_zeroes_tally() {
+    use frame_support::traits::fungible::Inspect;
+    use pallet_revive::AddressMapper;
+
+    new_test_ext().execute_with(|| {
+        let addr = approved_and_finalized();
+        let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
+
+        // Give the contract enough free balance to honour the refund.
+        fund(&contract_acct, ENDOWMENT);
+
+        let alice_before = Balances::balance(&ALICE);
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::refundCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        // The full SubmissionDeposit (native) came back to ALICE, plus the storage
+        // deposit reclaimed by clearing her now-empty tally entry — so "at least".
+        assert!(
+            Balances::balance(&ALICE) >= alice_before + SUBMISSION_DEPOSIT,
+            "refund must return at least the recorded deposit to the caller",
+        );
+        // ...and the tally is now zero (the entry was cleared, not just zeroed).
+        assert_eq!(deposit_of(addr, Address::from(ALICE_ADDR.0)), U256::ZERO);
+    });
+}
+
+/// The safety property: if the contract can't cover the refund, the call reverts,
+/// no funds move, and the caller's tally is preserved (not zeroed). Here the
+/// contract is short precisely because `finalize` already spent the deposit into
+/// the referendum's reserve — so without an external top-up there's nothing to
+/// pay the refund with.
+#[test]
+fn refund_reverts_and_preserves_tally_when_contract_is_short() {
+    use frame_support::traits::fungible::Inspect;
+    use pallet_revive::AddressMapper;
+
+    new_test_ext().execute_with(|| {
+        let addr = approved_and_finalized();
+        let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
+
+        let tally_before = deposit_of(addr, Address::from(ALICE_ADDR.0));
+        assert!(tally_before > U256::ZERO, "precondition: ALICE has a recorded deposit");
+
+        let alice_before = Balances::balance(&ALICE);
+        let contract_free_before = Balances::balance(&contract_acct);
+        // The deposit was reserved by the referendum, so the contract's *free*
+        // balance can't cover paying it back.
+        assert!(
+            contract_free_before < SUBMISSION_DEPOSIT,
+            "precondition: contract lacks the free funds to refund (got {contract_free_before})",
+        );
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::refundCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        // The transfer failed, so the contract reverted the whole call.
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+
+        // No funds moved...
+        assert_eq!(Balances::balance(&ALICE), alice_before, "caller balance must be unchanged");
+        assert_eq!(
+            Balances::balance(&contract_acct),
+            contract_free_before,
+            "contract balance must be unchanged",
+        );
+        // ...and crucially the tally was NOT zeroed — the user keeps what they're owed.
+        assert_eq!(
+            deposit_of(addr, Address::from(ALICE_ADDR.0)),
+            tally_before,
+            "a failed refund must restore the tally, never lose the user's deposit",
+        );
     });
 }
