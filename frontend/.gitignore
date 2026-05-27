@@ -5,3 +5,9 @@ out
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+
+# Test artifacts
+/test-results
+/playwright-report
+/blob-report
+/.playwright/.cache

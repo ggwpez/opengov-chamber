@@ -36,6 +36,37 @@ npm install
 npm run dev                       # http://localhost:3000
 ```
 
+## 3. Tests
+
+```bash
+npm test          # Vitest: unit (lib) + component (gating) tests — no wallet/node needed
+npm run test:watch
+npm run typecheck # tsc --noEmit, also covers the test files
+npm run e2e        # Playwright smoke test (boots `next dev` itself, headless Chromium)
+```
+
+First-time E2E only: `npx playwright install chromium`.
+
+Three layers, all runnable without a wallet or a deployed contract:
+
+- **Unit** (`src/lib/*.test.ts`). `format.test.ts` covers the address/hash validators and
+  the blake2-256 `callHashFromHex` derivation. `proposalKey.test.ts` is the important one:
+  it pins the client-side key derivation to the **same golden hash** the Rust suite asserts
+  (`../tests/tests/proposal_key.rs::proposal_key_golden_hash`), using the identical fixture.
+  If `proposalKey.ts` ever drifts from `contract/src/lib.rs::proposal_key`, approve/finalize
+  would silently key a non-existent proposal and revert — this test fails first.
+- **Component** (`src/components/*.test.tsx`, Vitest + Testing Library, wagmi mocked).
+  `ProposalCard.test.tsx` asserts the action-button gating — Approve only for un-signed
+  listed approvers, Finalize for the creator once `approvedBy ≥ minApprovers` (forwarding the
+  deposit as `value`), Cancel for the creator, and **no buttons** on terminal
+  (Submitted/Closed) proposals — plus that each click calls `writeContract` with the right
+  function and args. `ProposeForm.test.tsx` covers the validation gate (creator-as-approver,
+  min > approver count, wrong-network switch) and the `propose` call args.
+- **E2E** (`e2e/smoke.spec.ts`, Playwright). Boots the dev server and asserts the
+  disconnected shell hydrates without throwing. Wallet-driven flows aren't simulated — those
+  are the component layer's job; see the caveats below for why a real `finalize` E2E on Paseo
+  wouldn't be meaningful anyway.
+
 ## Notes / caveats
 
 - **`finalize` is payable** — it forwards ~10 PAS (the `SubmissionDeposit`, EVM-denominated
