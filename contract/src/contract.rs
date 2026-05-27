@@ -288,15 +288,6 @@ fn increase_deposit(addr: &Address, amount: U256) {
     set_deposit(addr, get_deposit(addr).saturating_add(amount));
 }
 
-/// Refund the entirety of `addr`'s recorded deposit back to `addr`, returning the
-/// amount sent.
-///
-/// The tally is zeroed *before* the transfer (checks-effects-interactions), so a
-/// re-entrant call sees a zero balance and cannot double-withdraw. Crucially, the
-/// transfer can fail (e.g. the contract is short on native funds) — when it does
-/// we return `Err`, the caller reverts the whole call, and that rollback restores
-/// the tally we just zeroed. So a failed refund moves no funds and loses no
-/// deposit: it is a complete no-op.
 fn refund(addr: &Address) -> Result<U256, ()> {
     let balance = get_deposit(addr);
     set_deposit(addr, U256::ZERO);

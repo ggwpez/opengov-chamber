@@ -5,13 +5,12 @@ interface Contract {
     struct Proposal {
         // Entry into the preimages pallet
         bytes32 callHash;
-        // Encoded byte length of the preimage `callHash` refers to. Required by
-        // `Bounded::Lookup { hash, len }` when submitting the referendum.
         uint32 callLen;
-        // Blocks to wait after the referendum passes before the call enacts
-        // (`DispatchTime::After(enactmentDelay)`).
+
         uint32 enactmentDelay;
+        
         address creator;
+
         address[] approvers;
         uint256 minApprovers;
         address[] approvedBy;
