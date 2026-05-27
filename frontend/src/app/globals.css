@@ -12,7 +12,6 @@
   --surface-2: #191926;
   --raised: #1f1f2e;
   --line: #2a2a3a;
-  --line-soft: rgba(236, 231, 223, 0.08);
 
   --text: #ece7df;
   --muted: #9696a8;
@@ -48,11 +47,7 @@ body {
   background-color: var(--ink);
   background-image:
     radial-gradient(1200px 600px at 78% -8%, rgba(230, 0, 122, 0.16), transparent 60%),
-    radial-gradient(900px 500px at 8% 4%, rgba(84, 231, 164, 0.06), transparent 55%),
-    linear-gradient(var(--line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
-  background-size: auto, auto, 64px 64px, 64px 64px;
-  background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+    radial-gradient(900px 500px at 8% 4%, rgba(84, 231, 164, 0.06), transparent 55%);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -75,6 +70,13 @@ a {
 }
 a:hover {
   text-decoration: underline;
+}
+
+/* Unified keyboard focus ring across every interactive control. Quiet for
+   mouse/touch (:focus-visible), visible and consistent for keyboard nav. */
+:focus-visible {
+  outline: 2px solid var(--magenta-ink);
+  outline-offset: 2px;
 }
 
 /* ----------------------------------------------------------- layout */
@@ -240,17 +242,12 @@ a:hover {
   font-size: 15px;
   font-weight: 500;
   letter-spacing: -0.01em;
-  word-break: break-all;
+  /* break the long 0x hash, but not the "Call hash:" label mid-word */
+  overflow-wrap: anywhere;
 }
 .card-hash.struck {
   text-decoration: line-through;
   color: var(--muted);
-}
-.card-sub {
-  margin-top: 4px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--faint);
 }
 
 .kv {
@@ -462,6 +459,11 @@ a:hover {
 .textarea:focus {
   border-color: var(--magenta);
 }
+.input:focus-visible,
+.textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--magenta) 28%, transparent);
+}
 .input.invalid,
 .textarea.invalid {
   border-color: var(--danger);
@@ -475,6 +477,13 @@ a:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  /* match the spacing a single .field contributes below itself */
+  margin-bottom: 16px;
+}
+/* the grid's own gap handles spacing between its fields — drop the extra
+   margin so the single-column (mobile) layout doesn't double up to 32px */
+.grid-2 .field {
+  margin-bottom: 0;
 }
 @media (max-width: 560px) {
   .grid-2 {
@@ -621,6 +630,10 @@ button.addr-pill:hover {
   font-size: 15px;
   cursor: pointer;
   line-height: 1;
+  /* enlarge the hit target without shifting the glyph out of the header line */
+  padding: 6px 8px;
+  margin: -6px -8px -6px 0;
+  border-radius: var(--radius);
 }
 .modal-x:hover {
   color: var(--text);
@@ -733,5 +746,18 @@ button.addr-pill:hover {
   }
   to {
     opacity: 1;
+  }
+}
+
+/* Respect users who ask for less motion: kill the staggered card entrance,
+   modal rise/fade, and meter/transition animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
