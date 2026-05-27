@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { BaseError, formatEther } from 'viem';
-import { contractAbi, type Proposal } from '@/lib/abi';
+import { contractAbi, ProposalStatus, type Proposal } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
@@ -15,7 +15,7 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
   const { isConnected } = useAccount();
   const { activeAddress: address } = useActiveAccount();
   const queryClient = useQueryClient();
-  const [action, setAction] = useState<'approve' | 'finalize' | null>(null);
+  const [action, setAction] = useState<'approve' | 'finalize' | 'close' | null>(null);
 
   const key = proposalKey(proposal);
   const approved = proposal.approvedBy.map((a) => a.toLowerCase());
@@ -24,25 +24,34 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
   const ready = count >= required;
   const pct = required === 0 ? 100 : Math.min(100, Math.round((count / required) * 100));
 
+  // Only proposals in `Review` accept any on-chain action; `Submitted`/`Closed`
+  // are terminal and the contract reverts every write against them.
+  const isReview = proposal.status === ProposalStatus.Review;
+  const isSubmitted = proposal.status === ProposalStatus.Submitted;
+  const isClosed = proposal.status === ProposalStatus.Closed;
+
   const isApprover = !!address && proposal.approvers.some((a) => a.toLowerCase() === address.toLowerCase());
+  const isCreator = !!address && proposal.creator.toLowerCase() === address.toLowerCase();
   const hasApproved = !!address && approved.includes(address.toLowerCase());
-  const canApprove = isConnected && isApprover && !hasApproved;
+  const canApprove = isReview && isConnected && isApprover && !hasApproved;
+  const canFinalize = isReview && isConnected && isCreator && ready;
+  const canClose = isReview && isConnected && isCreator;
 
   const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
   const { isLoading: confirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
-  function run(which: 'approve' | 'finalize') {
+  function run(which: 'approve' | 'finalize' | 'close') {
     reset();
     setAction(which);
     const onSettled = { onSuccess: () => queryClient.invalidateQueries() };
-    if (which === 'approve') {
+    if (which === 'finalize') {
       writeContract(
-        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'approve', args: [key] },
+        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'finalize', args: [key], value: FINALIZE_DEPOSIT },
         onSettled,
       );
     } else {
       writeContract(
-        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: 'finalize', args: [key], value: FINALIZE_DEPOSIT },
+        { account: address, address: CONTRACT_ADDRESS, abi: contractAbi, functionName: which, args: [key] },
         onSettled,
       );
     }
@@ -50,14 +59,43 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
 
   const busy = isPending || confirming;
 
+  const statusTag = isClosed
+    ? {
+        cls: 'closed',
+        label: 'cancelled',
+        title: 'Closed by the creator before finalizing. Terminal — no further action is possible.',
+      }
+    : isSubmitted
+      ? {
+          cls: 'submitted',
+          label: 'submitted',
+          title:
+            'Finalized: the contract dispatched Referenda::submit on-chain via the XCM precompile. Terminal — no further action is possible.',
+        }
+      : ready
+        ? {
+            cls: 'ready',
+            label: 'ready to submit',
+            title: `Threshold met (${count}/${required} approvals). The creator can now finalize to submit the referendum.`,
+          }
+        : {
+            cls: 'pending',
+            label: 'under review',
+            title: `Still in review, collecting approvals (${count}/${required}). Listed approvers can sign; the creator can cancel.`,
+          };
+
   return (
-    <article className={`card rise ${ready ? 'is-ready' : ''}`} style={{ animationDelay: `${index * 60}ms` }}>
+    <article
+      className={`card rise ${isClosed ? 'is-closed' : isSubmitted ? 'is-submitted' : ready ? 'is-ready' : ''}`}
+      style={{ animationDelay: `${index * 60}ms` }}
+    >
       <div className="card-head">
         <div>
-          <div className="card-hash">{shorten(proposal.callHash, 10, 8)}</div>
-          <div className="card-sub">key {shorten(key, 10, 8)}</div>
+          <div className={`card-hash ${isClosed ? 'struck' : ''}`}>Call hash: {proposal.callHash}</div>
         </div>
-        <span className={`tag ${ready ? 'ready' : 'pending'}`}>{ready ? 'ready to submit' : 'collecting'}</span>
+        <span className={`tag ${statusTag.cls}`} title={statusTag.title}>
+          {statusTag.label}
+        </span>
       </div>
 
       <dl className="kv">
@@ -73,44 +111,65 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
           <dt>Enactment delay</dt>
           <dd>{proposal.enactmentDelay} blocks</dd>
         </div>
-        <div>
-          <dt>Approvals</dt>
-          <dd>
-            {count} / {required}
-            <div className={`meter ${ready ? 'full' : ''}`}>
-              <span style={{ width: `${pct}%` }} />
-            </div>
-          </dd>
-        </div>
       </dl>
 
-      <div className="approvers">
-        {proposal.approvers.map((a) => (
-          <span key={a} className={`chip ${approved.includes(a.toLowerCase()) ? 'signed' : ''}`}>
-            {approved.includes(a.toLowerCase()) ? '✓ ' : ''}
-            {shorten(a, 5, 4)}
+      <div className="approvers-block">
+        <div className="approvers-head">
+          <span className="approvers-label">
+            {count} of {required} approved
           </span>
-        ))}
-      </div>
-
-      <div className="row spread" style={{ marginTop: 18 }}>
-        <span className="muted mono" style={{ fontSize: 11 }}>
-          {hasApproved ? 'you signed' : isApprover ? 'you can sign' : 'observer'}
-        </span>
-        <div className="row">
-          <button className="btn" disabled={!canApprove || busy} onClick={() => run('approve')}>
-            {busy && action === 'approve' ? 'Approving…' : 'Approve'}
-          </button>
-          <button className="btn btn-mint" disabled={!ready || !isConnected || busy} onClick={() => run('finalize')}>
-            {busy && action === 'finalize' ? 'Submitting…' : `Finalize · ${formatEther(FINALIZE_DEPOSIT)} PAS`}
-          </button>
+        </div>
+        <div className={`meter ${ready ? 'full' : ''}`}>
+          <span style={{ width: `${pct}%` }} />
+        </div>
+        <div className="approvers">
+          {proposal.approvers.map((a) => (
+            <span key={a} className={`chip ${approved.includes(a.toLowerCase()) ? 'signed' : ''}`}>
+              {approved.includes(a.toLowerCase()) ? '✓ ' : ''}
+              {shorten(a, 5, 4)}
+            </span>
+          ))}
         </div>
       </div>
+
+      {isReview && (
+        <div className="row" style={{ marginTop: 18, justifyContent: 'flex-end' }}>
+          <button
+            className="btn"
+            disabled={!canApprove || busy}
+            onClick={() => run('approve')}
+            title={
+              canApprove || busy
+                ? undefined
+                : !isConnected
+                  ? 'Connect a wallet to approve.'
+                  : !isApprover
+                    ? 'Only listed approvers can approve this proposal.'
+                    : hasApproved
+                      ? "You've already approved this proposal."
+                      : undefined
+            }
+          >
+            {busy && action === 'approve' ? 'Approving…' : 'Approve'}
+          </button>
+          {isCreator && (
+            <button className="btn btn-mint" disabled={!canFinalize || busy} onClick={() => run('finalize')}>
+              {busy && action === 'finalize' ? 'Submitting…' : `Finalize · ${formatEther(FINALIZE_DEPOSIT)} PAS`}
+            </button>
+          )}
+          {canClose && (
+            <button className="btn btn-danger" disabled={busy} onClick={() => run('close')}>
+              {busy && action === 'close' ? 'Cancelling…' : 'Cancel'}
+            </button>
+          )}
+        </div>
+      )}
 
       {isSuccess && action === 'approve' && <div className="notice ok">Approval recorded.</div>}
       {isSuccess && action === 'finalize' && (
         <div className="notice ok">Finalized — referendum submission dispatched via the XCM precompile.</div>
       )}
+      {isSuccess && action === 'close' && <div className="notice ok">Proposal cancelled.</div>}
       {error && <div className="notice err">{(error as BaseError).shortMessage ?? error.message}</div>}
     </article>
   );

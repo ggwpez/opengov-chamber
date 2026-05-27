@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAccount, useDisconnect, useSwitchChain } from 'wagmi';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { paseoHub } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 import { useActiveAccount } from '@/lib/activeAccount';
@@ -12,7 +12,6 @@ export function ConnectButton() {
   // reflects networks outside our config too. Do NOT use useChainId() — that's
   // config-scoped and can report paseoHub even while the wallet is on mainnet.
   const { isConnected, chainId } = useAccount();
-  const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
   const { activeAddress } = useActiveAccount();
   const [open, setOpen] = useState(false);
@@ -45,9 +44,6 @@ export function ConnectButton() {
       <span className="dot" />
       <button className="addr-pill" title="Switch wallet or account" onClick={() => setOpen(true)}>
         {shorten(activeAddress ?? '')}
-      </button>
-      <button className="btn" onClick={() => disconnect()}>
-        Disconnect
       </button>
       {open && <ConnectModal onClose={() => setOpen(false)} />}
     </div>

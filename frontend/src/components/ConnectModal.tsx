@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useAccount, useConnect, useConnectors, type Connector } from 'wagmi';
+import { useAccount, useConnect, useConnectors, useDisconnect, type Connector } from 'wagmi';
 import { useActiveAccount } from '@/lib/activeAccount';
 import { paseoHub } from '@/lib/chain';
 import { shorten } from '@/lib/format';
@@ -21,6 +21,7 @@ export function ConnectModal({ onClose }: { onClose: () => void }) {
   const connectors = useConnectors();
   const { connectAsync, isPending } = useConnect();
   const { connector: active, addresses, isConnected, chainId } = useAccount();
+  const { disconnect } = useDisconnect();
   const { activeAddress, selectAccount } = useActiveAccount();
 
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -139,6 +140,17 @@ export function ConnectModal({ onClose }: { onClose: () => void }) {
         {error && <div className="notice err">{error}</div>}
 
         <div className="modal-foot">
+          {isConnected && (
+            <button
+              className="btn disconnect"
+              onClick={() => {
+                disconnect();
+                onClose();
+              }}
+            >
+              Disconnect
+            </button>
+          )}
           <button className="btn btn-primary" onClick={onClose} disabled={!isConnected}>
             Done
           </button>

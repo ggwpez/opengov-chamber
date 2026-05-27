@@ -19,7 +19,7 @@ export default function Home() {
 
       <section className="hero">
         <h1>
-          Author referenda <span className="ital">together</span>, submit them on-chain.
+          Author and submit referenda <span className="ital">together</span>.
         </h1>
         <p>
           A multisig on Polkadot Hub. Propose an OpenGov referendum by its preimage hash, gather
@@ -39,15 +39,6 @@ export default function Home() {
 
       <div className="section-label">The ledger</div>
       <ProposalList />
-
-      <footer className="foot">
-        Finalize is payable: it forwards ~10 PAS as the referendum SubmissionDeposit, since the submit
-        is dispatched from the contract&apos;s sovereign account.
-        <br />
-        Note: on Paseo, runtime constants (pallet indices, deposit, governance track) differ from
-        Polkadot Hub, which this contract is pinned to — finalize exercises the path but won&apos;t
-        produce a correct referendum here.
-      </footer>
     </main>
   );
 }

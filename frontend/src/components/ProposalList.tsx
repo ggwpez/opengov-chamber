@@ -1,7 +1,7 @@
 'use client';
 
 import { useReadContract } from 'wagmi';
-import { contractAbi, type Proposal } from '@/lib/abi';
+import { contractAbi, ProposalStatus, type Proposal } from '@/lib/abi';
 import { CONTRACT_ADDRESS, CONTRACT_CONFIGURED } from '@/lib/contract';
 import { ProposalCard } from './ProposalCard';
 
@@ -30,11 +30,33 @@ export function ProposalList() {
     return <div className="empty">No proposals yet. Author the first one above.</div>;
   }
 
+  // Keep open proposals (still in Review) apart from terminal ones — finalized
+  // (Submitted) and cancelled (Closed) — so the active queue isn't cluttered.
+  const open = proposals.filter((p) => p.status === ProposalStatus.Review);
+  const archived = proposals.filter((p) => p.status !== ProposalStatus.Review);
+
   return (
-    <div className="cards">
-      {proposals.map((p, i) => (
-        <ProposalCard key={`${p.callHash}-${i}`} proposal={p} index={i} />
-      ))}
-    </div>
+    <>
+      {open.length === 0 ? (
+        <div className="empty">No open proposals. All caught up.</div>
+      ) : (
+        <div className="cards">
+          {open.map((p, i) => (
+            <ProposalCard key={`${p.callHash}-${i}`} proposal={p} index={i} />
+          ))}
+        </div>
+      )}
+
+      {archived.length > 0 && (
+        <>
+          <div className="section-label">Submitted &amp; cancelled</div>
+          <div className="cards">
+            {archived.map((p, i) => (
+              <ProposalCard key={`${p.callHash}-${i}`} proposal={p} index={i} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
   );
 }

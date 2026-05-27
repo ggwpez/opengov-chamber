@@ -208,6 +208,21 @@ a:hover {
 .card.is-ready::before {
   background: var(--mint);
 }
+.card.is-submitted::before {
+  background: var(--muted);
+}
+.card.is-closed::before {
+  background: var(--danger);
+}
+/* archived (terminal) proposals are de-emphasized vs. the open queue */
+.card.is-submitted,
+.card.is-closed {
+  opacity: 0.78;
+}
+.card.is-submitted:hover,
+.card.is-closed:hover {
+  opacity: 1;
+}
 
 .card-head {
   display: flex;
@@ -220,6 +235,11 @@ a:hover {
   font-size: 15px;
   font-weight: 500;
   letter-spacing: -0.01em;
+  word-break: break-all;
+}
+.card-hash.struck {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 .card-sub {
   margin-top: 4px;
@@ -267,6 +287,27 @@ a:hover {
   background: linear-gradient(90deg, #2ec27e, var(--mint));
 }
 
+.approvers-block {
+  margin: 20px 0 18px;
+}
+.approvers-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.approvers-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.approvers-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
 .approvers {
   display: flex;
   flex-wrap: wrap;
@@ -297,6 +338,7 @@ a:hover {
   padding: 4px 9px;
   border-radius: 999px;
   white-space: nowrap;
+  cursor: help;
 }
 .tag.pending {
   color: var(--amber);
@@ -305,6 +347,14 @@ a:hover {
 .tag.ready {
   color: var(--mint);
   background: color-mix(in srgb, var(--mint) 14%, transparent);
+}
+.tag.submitted {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+.tag.closed {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
 /* ----------------------------------------------------------- buttons */
@@ -356,6 +406,15 @@ a:hover {
 }
 .btn-mint:hover:not(:disabled) {
   background: color-mix(in srgb, var(--mint) 14%, transparent);
+}
+.btn-danger {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+  font-weight: 600;
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
 /* ----------------------------------------------------------- forms */
@@ -627,7 +686,12 @@ button.addr-pill:hover {
 .modal-foot {
   display: flex;
   justify-content: flex-end;
+  gap: 10px;
   margin-top: 20px;
+}
+
+.modal-foot .disconnect {
+  margin-right: auto;
 }
 
 .foot {

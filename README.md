@@ -59,24 +59,24 @@ proposals still appear in `proposal(hash)` and `allProposals()`. (Refunds are un
 status: `refund()` pays back the caller's accumulated deposit tally and is independent of any
 proposal's state.)
 
-## UI work needed (for the next agent)
+## UI support for status & cancel (done)
 
-The on-chain change above is done and tested; the frontend (`frontend/`) still needs to catch
-up:
+The on-chain change above is reflected in the frontend (`frontend/`):
 
-1. **Regenerate the ABI / types.** `Proposal` gained a trailing `status` field and there's a
-   new `ProposalStatus` enum — any decoded proposal now has an extra `uint8`. Re-export the
-   ABI from `Contract.sol` / rebuild whatever the frontend consumes.
-2. **Surface the status** on each proposal (badge: Review / Submitted / Closed).
-3. **Gate the action buttons by status** (all only enabled in `Review`):
-   - Approve → only for listed approvers who haven't approved yet.
-   - Finalize → creator only, once `approvedBy ≥ minApprovers`.
-   - Close → creator only.
-   Disable/hide them for `Submitted` and `Closed`, since the contract will revert.
-4. **Show closed proposals** — `allProposals()` now includes `Closed` ones (they're no longer
-   deleted); consider a filter or visually de-emphasizing them.
-5. There's a `Closed` event (`event Closed(bytes32 indexed proposalHash)`) alongside the
-   existing `Finalized`/`Approved`/etc. if the UI subscribes to events.
+1. **ABI / types synced.** `src/lib/abi.ts` carries the trailing `status` field on `Proposal`,
+   the `close`/`refund`/`deposits` functions, the `Closed`/`Refunded` events, and the new
+   errors. A `ProposalStatus` enum (`Review`/`Submitted`/`Closed`) is exported alongside the
+   `Proposal` type.
+2. **Status badge** on every card — `collecting`/`ready to submit` while in `Review`,
+   `submitted`, or `cancelled`.
+3. **Actions gated by status.** Approve/Finalize/Cancel only render while a proposal is in
+   `Review`; terminal proposals show no action buttons (the contract would revert):
+   - Approve → listed approvers who haven't approved yet.
+   - Finalize → creator only, enabled once `approvedBy ≥ minApprovers`.
+   - Cancel (`close`) → creator only.
+4. **Separate lists.** `ProposalList` splits the open (`Review`) queue from the terminal
+   (`Submitted`/`Closed`) ones, which sit under a "Submitted & cancelled" heading and are
+   visually de-emphasized so they don't clutter the active queue.
 
 ## Layout
 

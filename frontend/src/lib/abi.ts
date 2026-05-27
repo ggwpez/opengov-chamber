@@ -23,6 +23,7 @@ export const contractAbi = [
           { name: 'approvers', type: 'address[]' },
           { name: 'minApprovers', type: 'uint256' },
           { name: 'approvedBy', type: 'address[]' },
+          { name: 'status', type: 'uint8' },
         ],
       },
     ],
@@ -44,9 +45,17 @@ export const contractAbi = [
           { name: 'approvers', type: 'address[]' },
           { name: 'minApprovers', type: 'uint256' },
           { name: 'approvedBy', type: 'address[]' },
+          { name: 'status', type: 'uint8' },
         ],
       },
     ],
+  },
+  {
+    type: 'function',
+    name: 'deposits',
+    stateMutability: 'view',
+    inputs: [{ name: 'depositor', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
   },
   {
     type: 'function',
@@ -76,6 +85,20 @@ export const contractAbi = [
     outputs: [],
   },
   {
+    type: 'function',
+    name: 'close',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'proposalHash', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'refund',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
     type: 'event',
     name: 'Proposed',
     inputs: [
@@ -101,9 +124,36 @@ export const contractAbi = [
     ],
     anonymous: false,
   },
+  {
+    type: 'event',
+    name: 'Closed',
+    inputs: [{ name: 'proposalHash', type: 'bytes32', indexed: true }],
+    anonymous: false,
+  },
+  {
+    type: 'event',
+    name: 'Refunded',
+    inputs: [
+      { name: 'to', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+    anonymous: false,
+  },
   { type: 'error', name: 'NotApproved', inputs: [] },
   { type: 'error', name: 'InsufficientDeposit', inputs: [] },
+  { type: 'error', name: 'ProposalNotFound', inputs: [] },
+  { type: 'error', name: 'NotOwner', inputs: [] },
 ] as const;
+
+/**
+ * Lifecycle status of a proposal, ABI-encoded as `uint8`. Mirrors the
+ * `ProposalStatus` enum in `Contract.sol`.
+ */
+export enum ProposalStatus {
+  Review = 0,
+  Submitted = 1,
+  Closed = 2,
+}
 
 /** Shape of a single proposal as returned by `allProposals` / `proposal`. */
 export type Proposal = {
@@ -114,4 +164,5 @@ export type Proposal = {
   approvers: readonly `0x${string}`[];
   minApprovers: bigint;
   approvedBy: readonly `0x${string}`[];
+  status: ProposalStatus;
 };
