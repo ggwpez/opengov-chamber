@@ -7,7 +7,7 @@ use alloy_core::{
     primitives::{keccak256, Address, FixedBytes, U256},
     sol_types::{sol_data, EventTopic, SolCall, SolError, SolEvent, SolValue},
 };
-use contract::{Contract, ProposalError, proposal_key, xcm};
+use contract::{Contract, ProposalError, expect_review, mark_closed, mark_submitted, proposal_key, xcm};
 use pallet_revive_uapi::{CallFlags, HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
@@ -41,6 +41,7 @@ pub extern "C" fn call() {
                 approvers: call.approvers,
                 minApprovers: call.minApprovers,
                 approvedBy: Vec::new(),
+                status: Contract::ProposalStatus::Review,
             };
 
             let key = match proposal_key(&prop) {
@@ -110,6 +111,10 @@ pub extern "C" fn call() {
 
             // Tally the funds sent against the depositor so they can later `refund`.
             increase_deposit(&get_caller(), value);
+
+            // Persist the `Submitted` status. On a dispatch failure below we
+            // `REVERT`, which unwinds this write along with the deposit tally.
+            set_proposal(&proposal);
 
             // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
             // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
@@ -212,12 +217,6 @@ fn add_proposal_key(key: [u8; 32]) {
     set_all_proposal_keys(&keys);
 }
 
-fn remove_proposal_key(key: [u8; 32]) {
-    let mut keys = get_all_proposal_keys();
-    keys.retain(|k| k != &key);
-    set_all_proposal_keys(&keys);
-}
-
 fn get_all_proposals() -> Vec<Contract::Proposal> {
     get_all_proposal_keys()
         .iter()
@@ -227,6 +226,10 @@ fn get_all_proposals() -> Vec<Contract::Proposal> {
 
 fn approve_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
     let mut proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
+
+    // Approvals only count while the proposal is still in `Review`; a submitted
+    // or closed proposal can't be approved.
+    expect_review(&proposal)?;
 
     if !proposal.approvers.contains(&get_caller()) {
         return Err(ProposalError::NotAnApprover);
@@ -241,11 +244,14 @@ fn approve_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
     Ok(())
 }
 
-/// Load a proposal and verify it has reached its approval threshold.
+/// Load a proposal, verify it can be finalized, and advance it to `Submitted`.
 ///
-/// Returns the proposal on success so the caller can act on its `callHash`.
+/// Checks the approval threshold and creator, then performs the
+/// `Review -> Submitted` transition (which rejects an already-submitted or
+/// closed proposal). Returns the updated proposal so the caller can persist it
+/// and act on its `callHash`.
 fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError> {
-    let proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
+    let mut proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
 
     if U256::from(proposal.approvedBy.len() as u64) < proposal.minApprovers {
         return Err(ProposalError::NotApproved);
@@ -255,6 +261,8 @@ fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError
     if proposal.creator != get_caller() {
         return Err(ProposalError::NotOwner);
     }
+
+    mark_submitted(&mut proposal)?;
 
     Ok(proposal)
 }
@@ -309,15 +317,20 @@ fn refund(addr: &Address) -> Result<U256, ()> {
     Ok(balance)
 }
 
+/// Mark a proposal as `Closed`, leaving it stored so the status stays queryable.
+///
+/// Only the creator may close, and only before finalizing: `mark_closed`
+/// performs the `Review -> Closed` transition and rejects a proposal that has
+/// already been submitted or closed.
 fn close_proposal(key: &[u8; 32]) -> Result<(), ProposalError> {
-    let proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
+    let mut proposal = get_proposal(key).ok_or(ProposalError::ProposalNotFound)?;
 
     if proposal.creator != get_caller() {
         return Err(ProposalError::NotOwner);
     }
 
-    api::set_storage_or_clear(StorageFlags::empty(), &key, &[0u8; 32]);
-    remove_proposal_key(*key);
+    mark_closed(&mut proposal)?;
+    set_proposal(&proposal);
 
     Ok(())
 }

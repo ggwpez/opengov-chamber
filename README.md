@@ -12,15 +12,71 @@ ABI so any Ethereum tooling (and the bundled frontend) can talk to it.
 
 1. **Propose** — anyone registers a proposal: the preimage `callHash` + `callLen` of the
    runtime call to enact, an enactment delay, an ordered set of `approvers`, and a
-   `minApprovers` threshold.
-2. **Approve** — each listed approver signs once. Approvals are tracked on-chain.
-3. **Finalize** — once `approvedBy ≥ minApprovers`, anyone can finalize. The contract
+   `minApprovers` threshold. The proposal starts in status **`Review`**.
+2. **Approve** — each listed approver signs once. Approvals are tracked on-chain. Only
+   possible while the proposal is in `Review`.
+3. **Finalize** — once `approvedBy ≥ minApprovers`, **the creator** finalizes. The contract
    `api::call`s the **XCM precompile** with a local `Transact` wrapping
-   `Referenda::submit`, dispatched under the contract's own signed origin.
+   `Referenda::submit`, dispatched under the contract's own signed origin, and the proposal
+   moves to status **`Submitted`**.
+4. **Close** — alternatively, **the creator** can abandon a proposal before finalizing,
+   moving it to status **`Closed`**. Not possible after finalizing.
 
 Because the submit runs as the contract's sovereign account, `finalize()` is **payable**:
 the caller must forward the referendum `SubmissionDeposit` (~10 DOT, EVM-denominated) as
 value, which `pallet-revive` credits to the contract before the dispatch.
+
+## Proposal lifecycle / status
+
+Every `Proposal` carries a `ProposalStatus status` field (a Solidity `enum`, ABI-encoded as
+`uint8`):
+
+| Value | Variant | Meaning |
+|---|---|---|
+| `0` | `Review` | Just proposed; collecting approvals. Can be approved, finalized, or closed. |
+| `1` | `Submitted` | `finalize` ran and the referendum was dispatched. **Terminal.** |
+| `2` | `Closed` | `close` ran before finalizing; abandoned. **Terminal.** |
+
+```
+         approve (creator-listed approvers, stays in Review)
+         ┌────┐
+         ▼    │
+  propose ──▶ Review ──finalize──▶ Submitted   (terminal)
+                 │
+                 └──── close ─────▶ Closed      (terminal)
+```
+
+Both terminal states reject every further action: `approve`, `finalize`, and `close` all
+revert once a proposal has left `Review`. Guard rules enforced on-chain:
+
+- `approve` — caller must be a listed approver, not already recorded, **and** status must be
+  `Review`.
+- `finalize` — caller must be the **creator**, threshold met, **and** status `Review`.
+- `close` — caller must be the **creator** **and** status `Review`.
+
+**`close` no longer deletes the proposal** — it retains it with `status = Closed`, so closed
+proposals still appear in `proposal(hash)` and `allProposals()`. (Refunds are unrelated to
+status: `refund()` pays back the caller's accumulated deposit tally and is independent of any
+proposal's state.)
+
+## UI work needed (for the next agent)
+
+The on-chain change above is done and tested; the frontend (`frontend/`) still needs to catch
+up:
+
+1. **Regenerate the ABI / types.** `Proposal` gained a trailing `status` field and there's a
+   new `ProposalStatus` enum — any decoded proposal now has an extra `uint8`. Re-export the
+   ABI from `Contract.sol` / rebuild whatever the frontend consumes.
+2. **Surface the status** on each proposal (badge: Review / Submitted / Closed).
+3. **Gate the action buttons by status** (all only enabled in `Review`):
+   - Approve → only for listed approvers who haven't approved yet.
+   - Finalize → creator only, once `approvedBy ≥ minApprovers`.
+   - Close → creator only.
+   Disable/hide them for `Submitted` and `Closed`, since the contract will revert.
+4. **Show closed proposals** — `allProposals()` now includes `Closed` ones (they're no longer
+   deleted); consider a filter or visually de-emphasizing them.
+5. There's a `Closed` event (`event Closed(bytes32 indexed proposalHash)`) alongside the
+   existing `Finalized`/`Approved`/etc. if the UI subscribes to events.
 
 ## Layout
 

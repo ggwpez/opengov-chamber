@@ -46,6 +46,7 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
         approvers: vec![Address::from(BOB_ADDR.0)],
         minApprovers: contract::U256::from(1u64),
         approvedBy: vec![],
+        status: Contract::ProposalStatus::Review,
     };
 
     let contract = BareInstantiateBuilder::<Test>::bare_instantiate(
@@ -637,6 +638,306 @@ fn approved_and_finalized() -> H160 {
     assert_eq!(result.flags, ReturnFlags::empty());
 
     addr
+}
+
+// ----------------------------------------------------------- status lifecycle
+//
+// A proposal moves through `ProposalStatus`:
+//
+//   Review ──finalize──▶ Submitted   (terminal)
+//      │
+//      └────close──────▶ Closed      (terminal)
+//
+// Both target states are terminal: a Submitted proposal can't be closed, and a
+// Closed proposal can't be finalized (or closed again). The tests below pin down
+// each edge and each rejected transition.
+
+/// Fetch a proposal by key via the `proposal(bytes32)` view.
+fn fetch_proposal(addr: H160, key: [u8; 32]) -> Contract::Proposal {
+    let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+        .data(Contract::proposalCall { proposalHash: key.into() }.abi_encode())
+        .transaction_limits(limits())
+        .build_and_unwrap_result();
+    assert_eq!(result.flags, ReturnFlags::empty());
+    <Contract::Proposal>::abi_decode_validate(&result.data).unwrap()
+}
+
+/// BOB (the sole approver) approves the proposal, meeting `minApprovers: 1`.
+fn approve_by_bob(addr: H160, key: [u8; 32]) {
+    let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+        .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+        .transaction_limits(limits())
+        .build_and_unwrap_result();
+    assert_eq!(result.flags, ReturnFlags::empty());
+}
+
+/// Call `finalize`, attaching the SubmissionDeposit as value.
+fn finalize_as(
+    signer: sp_runtime::AccountId32,
+    addr: H160,
+    key: [u8; 32],
+) -> pallet_revive::ExecReturnValue {
+    BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(signer), addr)
+        .data(Contract::finalizeCall { proposalHash: key.into() }.abi_encode())
+        .native_value(SUBMISSION_DEPOSIT)
+        .transaction_limits(limits())
+        .build_and_unwrap_result()
+}
+
+/// Call `close`.
+fn close_as(
+    signer: sp_runtime::AccountId32,
+    addr: H160,
+    key: [u8; 32],
+) -> pallet_revive::ExecReturnValue {
+    BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(signer), addr)
+        .data(Contract::closeCall { proposalHash: key.into() }.abi_encode())
+        .transaction_limits(limits())
+        .build_and_unwrap_result()
+}
+
+/// A freshly proposed proposal starts in `Review`.
+#[test]
+fn propose_starts_in_review() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Review);
+    });
+}
+
+/// `Review -> Submitted`: a successful `finalize` advances the stored status to
+/// `Submitted`, and the proposal remains queryable.
+#[test]
+fn finalize_marks_submitted() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        approve_by_bob(addr, key);
+        assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+    });
+}
+
+/// `Review -> Closed`: `close` advances the stored status to `Closed`. The
+/// proposal is *retained* (not deleted) so the closed status stays observable,
+/// both via the single-proposal view and `allProposals`.
+#[test]
+fn close_marks_closed() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+
+        // Still listed by `allProposals`, now flagged as closed.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::allProposalsCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        let all = <Vec<Contract::Proposal>>::abi_decode_validate(&result.data).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].status, Contract::ProposalStatus::Closed);
+    });
+}
+
+/// `close` emits a `Closed` event for the proposal.
+#[test]
+fn close_emits_event() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        System::reset_events();
+        assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        let (topics, _data) = System::events()
+            .into_iter()
+            .rev()
+            .find_map(|record| match record.event {
+                RuntimeEvent::Revive(pallet_revive::Event::ContractEmitted {
+                    contract,
+                    topics,
+                    data,
+                }) if contract == addr => Some((topics, data)),
+                _ => None,
+            })
+            .expect("close should emit a ContractEmitted event");
+
+        assert_eq!(topics.len(), 2);
+        assert_eq!(topics[0].0, Contract::Closed::SIGNATURE_HASH.0);
+        assert_eq!(topics[1].0, key);
+    });
+}
+
+/// Closing is only the creator's to do: a non-creator's `close` reverts and the
+/// status is left in `Review`.
+#[test]
+fn close_by_non_owner_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        // BOB is an approver but not the creator (ALICE is).
+        let result = close_as(BOB, addr, key);
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Review);
+    });
+}
+
+/// `close` on a hash that maps to no stored proposal reverts.
+#[test]
+fn close_nonexistent_proposal_reverts() {
+    new_test_ext().execute_with(|| {
+        let (addr, _expected) = setup_with_proposal();
+
+        let result = close_as(ALICE, addr, B256::repeat_byte(0xFF).0);
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+    });
+}
+
+/// `Closed` is terminal: closing an already-closed proposal reverts and leaves
+/// the status `Closed`.
+#[test]
+fn close_twice_reverts() {
+    new_test_ext().execute_with(|| {
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        let second = close_as(ALICE, addr, key);
+        assert_eq!(second.flags, ReturnFlags::REVERT);
+        assert!(second.data.is_empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+    });
+}
+
+/// `Closed` is terminal w.r.t. finalize too: once closed, an otherwise-finalizable
+/// proposal (threshold already met) can't be finalized — it reverts and submits
+/// no referendum. This isolates the *status* guard from the approval-threshold
+/// guard by approving before closing.
+#[test]
+fn finalize_after_close_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        approve_by_bob(addr, key);
+        assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        // Threshold is met, so this revert is the status guard, not `NotApproved`.
+        let result = finalize_as(ALICE, addr, key);
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 0);
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+    });
+}
+
+/// `Submitted` is terminal: a finalized proposal can't be closed. The close
+/// reverts and the status stays `Submitted`.
+#[test]
+fn close_after_finalize_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        approve_by_bob(addr, key);
+        assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        let result = close_as(ALICE, addr, key);
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+    });
+}
+
+/// Approvals are only valid in `Review`: once a proposal is closed, an approver
+/// can no longer approve it. The revert is the status guard (BOB is a valid,
+/// not-yet-recorded approver), and `approvedBy` stays empty.
+#[test]
+fn approve_after_close_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        assert!(fetch_proposal(addr, key).approvedBy.is_empty());
+    });
+}
+
+/// Likewise, an approver can't pile on more approvals after the proposal has been
+/// finalized (Submitted). The pre-finalize approval from BOB remains, but a fresh
+/// approval attempt reverts.
+#[test]
+fn approve_after_finalize_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        approve_by_bob(addr, key);
+        assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
+
+        // The status guard runs before the approver/AlreadyApproved checks, so a
+        // further approval by BOB (a valid approver) reverts on status alone.
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert!(result.data.is_empty());
+
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+    });
+}
+
+/// `Submitted` is terminal w.r.t. finalize too: finalizing twice reverts on the
+/// second call and doesn't submit a second referendum.
+#[test]
+fn finalize_twice_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected) = setup_with_proposal();
+        let key = proposal_key(&expected).unwrap();
+
+        approve_by_bob(addr, key);
+        assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 1);
+
+        let second = finalize_as(ALICE, addr, key);
+        assert_eq!(second.flags, ReturnFlags::REVERT);
+        assert!(second.data.is_empty());
+
+        // No second referendum, and the status is unchanged.
+        assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 1);
+        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+    });
 }
 
 /// A successful `finalize` tallies the attached value against the caller. The

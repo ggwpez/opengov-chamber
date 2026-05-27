@@ -2,18 +2,30 @@
 pragma solidity ^0.8.0;
 
 interface Contract {
+    // Lifecycle of a proposal.
+    //   Review:    just proposed, still collecting approvals; can be finalized or closed.
+    //   Submitted: `finalize` was called and the referendum was dispatched. Terminal.
+    //   Closed:    `close` was called before finalizing. Terminal; cannot be finalized.
+    enum ProposalStatus {
+        Review,
+        Submitted,
+        Closed
+    }
+
     struct Proposal {
         // Entry into the preimages pallet
         bytes32 callHash;
         uint32 callLen;
 
         uint32 enactmentDelay;
-        
+
         address creator;
 
         address[] approvers;
         uint256 minApprovers;
         address[] approvedBy;
+
+        ProposalStatus status;
     }
 
     event Proposed(bytes32 indexed callHash, address indexed creator, address[] indexed approvers, uint256 minApprovers);

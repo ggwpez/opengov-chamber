@@ -17,7 +17,12 @@ sol! {
 }
 
 #[cfg(not(feature = "std"))]
-sol!("Contract.sol");
+sol! {
+    // `PartialEq`/`Eq` so the contract can match on `ProposalStatus` for its
+    // lifecycle guards (`mark_submitted`/`mark_closed`).
+    #![sol(extra_derives(PartialEq, Eq))]
+    "Contract.sol"
+}
 
 const MAX_PROPOSAL_BYTES: usize = 1024;
 
@@ -31,6 +36,40 @@ pub enum ProposalError {
     NotAnApprover,
     NotApproved,
     NotOwner,
+    /// The proposal is no longer in `Review`, so the requested lifecycle
+    /// transition (finalize or close) is not allowed.
+    ProposalNotInReview,
+}
+
+/// Apply the `Review -> Submitted` transition performed by `finalize`.
+///
+/// Only a proposal still in `Review` can be submitted; submitting an already
+/// submitted or closed proposal fails.
+pub fn mark_submitted(prop: &mut Contract::Proposal) -> Result<(), ProposalError> {
+    expect_review(prop)?;
+    prop.status = Contract::ProposalStatus::Submitted;
+    Ok(())
+}
+
+/// Apply the `Review -> Closed` transition performed by `close`.
+///
+/// Closing is only possible before finalizing: a `Submitted` proposal cannot be
+/// closed, and a `Closed` proposal cannot be closed again.
+pub fn mark_closed(prop: &mut Contract::Proposal) -> Result<(), ProposalError> {
+    expect_review(prop)?;
+    prop.status = Contract::ProposalStatus::Closed;
+    Ok(())
+}
+
+/// Guard that a proposal is still in `Review`. Used by the lifecycle transitions
+/// and by `approve` (approvals are only meaningful before a proposal leaves
+/// `Review`).
+pub fn expect_review(prop: &Contract::Proposal) -> Result<(), ProposalError> {
+    if prop.status == Contract::ProposalStatus::Review {
+        Ok(())
+    } else {
+        Err(ProposalError::ProposalNotInReview)
+    }
 }
 
 pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError> {

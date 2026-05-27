@@ -9,6 +9,7 @@ fn base() -> Contract::Proposal {
         approvers: vec![Address::repeat_byte(0x22), Address::repeat_byte(0x33)],
         minApprovers: U256::from(2u64),
         approvedBy: vec![],
+        status: Contract::ProposalStatus::Review,
     }
 }
 
@@ -87,6 +88,25 @@ fn proposal_key_ignores_approved_by() {
 }
 
 #[test]
+fn proposal_key_ignores_status() {
+    // The key is the proposal's identity, and `finalize`/`close` recompute it via
+    // `set_proposal` *after* changing `status`. If `status` fed into the key, those
+    // writes would land under a different key and orphan the stored proposal — so
+    // the lifecycle status must not influence the key.
+    let base_key = proposal_key(&base()).unwrap();
+
+    for status in [Contract::ProposalStatus::Submitted, Contract::ProposalStatus::Closed] {
+        let mut p = base();
+        p.status = status;
+        assert_eq!(
+            proposal_key(&p).unwrap(),
+            base_key,
+            "status must not influence the key",
+        );
+    }
+}
+
+#[test]
 fn proposal_key_errors_on_unsorted_approvers() {
     let mut p = base();
     p.approvers.reverse();
@@ -129,6 +149,7 @@ fn proposal_key_handles_zero_values() {
         approvers: vec![],
         minApprovers: U256::ZERO,
         approvedBy: vec![],
+        status: Contract::ProposalStatus::Review,
     };
     proposal_key(&p).unwrap();
 }
@@ -143,6 +164,7 @@ fn proposal_key_handles_max_values() {
         approvers: vec![Address::repeat_byte(0xFF)],
         minApprovers: U256::from(1u64),
         approvedBy: vec![],
+        status: Contract::ProposalStatus::Review,
     };
     proposal_key(&p).unwrap();
 }
