@@ -1,4 +1,11 @@
-use contract::{B256, Contract, sol_types::{SolCall, SolError, SolEvent, SolValue}};
+use contract::{
+    Address, U256, proposal_key,
+    xcm::referendum::{NATIVE_TO_ETH_RATIO, SUBMISSION_DEPOSIT},
+};
+use contract::{
+    B256, Contract,
+    sol_types::{SolCall, SolError, SolEvent, SolValue},
+};
 use contract_tests::{
     Balances, ConvictionVoting, ENDOWMENT, Referenda, RuntimeEvent, RuntimeOrigin, System, Test,
     fund, new_test_ext, roll_relay_until, set_relay_block,
@@ -6,14 +13,11 @@ use contract_tests::{
 use pallet_revive::{
     Code, H160, TransactionLimits, Weight,
     test_utils::{
-        ALICE, ALICE_ADDR,
-        BOB, BOB_ADDR,
-        CHARLIE,
+        ALICE, ALICE_ADDR, BOB, BOB_ADDR, CHARLIE,
         builder::{BareCallBuilder, BareInstantiateBuilder},
     },
 };
 use pallet_revive_uapi::ReturnFlags;
-use contract::{Address, U256, proposal_key, xcm::referendum::{SUBMISSION_DEPOSIT, NATIVE_TO_ETH_RATIO}};
 
 /// Built by `cd ../contract && cargo build` (build.rs runs PvmBuilder).
 /// Lands in the shared `target/` thanks to `.cargo/config.toml`.
@@ -61,13 +65,16 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
 
     // propose
     let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), contract.addr)
-        .data(Contract::proposeCall {
-            callHash: B256::repeat_byte(0xAA),
-            callLen: 42,
-            enactmentDelay: 100,
-            approvers: vec![Address::from(BOB_ADDR.0)],
-            minApprovers: contract::U256::from(1u64),
-        }.abi_encode())
+        .data(
+            Contract::proposeCall {
+                callHash: B256::repeat_byte(0xAA),
+                callLen: 42,
+                enactmentDelay: 100,
+                approvers: vec![Address::from(BOB_ADDR.0)],
+                minApprovers: contract::U256::from(1u64),
+            }
+            .abi_encode(),
+        )
         .transaction_limits(limits())
         .build_and_unwrap_result();
 
@@ -82,9 +89,12 @@ fn get_propose_works() {
         // fetch specific proposal
         let proposal_key = proposal_key(&expected_proposal).unwrap();
         let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::proposalCall {
-                proposalHash: proposal_key.into(),
-            }.abi_encode())
+            .data(
+                Contract::proposalCall {
+                    proposalHash: proposal_key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -116,13 +126,16 @@ fn proposing_twice_errors() {
 
         // propose again should revert
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::proposeCall {
-                callHash: B256::repeat_byte(0xAA),
-                callLen: 42,
-                enactmentDelay: 100,
-                approvers: vec![Address::from(BOB_ADDR.0)],
-                minApprovers: contract::U256::from(1u64),
-            }.abi_encode())
+            .data(
+                Contract::proposeCall {
+                    callHash: B256::repeat_byte(0xAA),
+                    callLen: 42,
+                    enactmentDelay: 100,
+                    approvers: vec![Address::from(BOB_ADDR.0)],
+                    minApprovers: contract::U256::from(1u64),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -169,9 +182,12 @@ fn approve_records_approval() {
 
         // BOB is an authorized approver and approves the proposal.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
         assert_eq!(result.flags, ReturnFlags::empty());
@@ -180,9 +196,12 @@ fn approve_records_approval() {
         // (and therefore the key) untouched — so the proposal is still found
         // under its original key.
         let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::proposalCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::proposalCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -200,9 +219,12 @@ fn approve_emits_event() {
         let key = proposal_key(&expected_proposal).unwrap();
 
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -236,9 +258,12 @@ fn approve_nonexistent_proposal_reverts() {
 
         // A hash that doesn't map to any stored proposal.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(CHARLIE), addr)
-            .data(Contract::approveCall {
-                proposalHash: B256::repeat_byte(0xFF),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: B256::repeat_byte(0xFF),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -257,9 +282,12 @@ fn approve_by_non_approver_reverts() {
         // CHARLIE isn't in `approvers` (only BOB is), so approving reverts
         // with `NotAnApprover`.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(CHARLIE), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -268,9 +296,12 @@ fn approve_by_non_approver_reverts() {
 
         // And nothing was recorded against the proposal.
         let proposal = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::proposalCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::proposalCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
         let proposal = <Contract::Proposal>::abi_decode_validate(&proposal.data).unwrap();
@@ -287,9 +318,12 @@ fn approving_twice_by_same_account_reverts() {
 
         // First approval from BOB (an authorized approver) succeeds.
         let first = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
         assert_eq!(first.flags, ReturnFlags::empty());
@@ -297,9 +331,12 @@ fn approving_twice_by_same_account_reverts() {
         // BOB is now in `approvedBy`, so a second approval reverts with
         // `AlreadyApproved`.
         let second = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -317,18 +354,24 @@ fn finalize_after_threshold_succeeds() {
 
         // BOB approves, meeting `minApprovers: 1`.
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
         // With the threshold met, finalize succeeds — sending the SubmissionDeposit
         // as value so the contract can cover the referendum deposit.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .native_value(SUBMISSION_DEPOSIT)
             .transaction_limits(limits())
             .build_and_unwrap_result();
@@ -367,9 +410,12 @@ fn finalize_submits_referendum() {
         let key = proposal_key(&expected_proposal).unwrap();
 
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -381,9 +427,12 @@ fn finalize_submits_referendum() {
         // Send the SubmissionDeposit as value; the contract then covers the deposit
         // when the XCM submit dispatches as its sovereign account (see fact #1).
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .native_value(SUBMISSION_DEPOSIT)
             .transaction_limits(limits())
             .build_and_unwrap_result();
@@ -447,9 +496,12 @@ fn finalize_without_deposit_reverts() {
         let key = proposal_key(&expected_proposal).unwrap();
 
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -459,9 +511,12 @@ fn finalize_without_deposit_reverts() {
 
         // One planck under the deposit, so finalize reverts at the deposit check.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .native_value(SUBMISSION_DEPOSIT - 1)
             .transaction_limits(limits())
             .build_and_unwrap_result();
@@ -498,17 +553,23 @@ fn finalize_emits_event() {
         let key = proposal_key(&expected_proposal).unwrap();
 
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
         System::reset_events();
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .native_value(SUBMISSION_DEPOSIT)
             .transaction_limits(limits())
             .build_and_unwrap_result();
@@ -545,9 +606,12 @@ fn finalize_below_threshold_reverts() {
 
         // No approvals yet, so finalize reverts with the `NotApproved` error.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -569,18 +633,24 @@ fn finalize_by_non_owner_reverts() {
         // BOB approves, meeting `minApprovers: 1`, so the threshold check passes
         // and finalize reaches the owner check.
         let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
         // BOB is an approver but not the creator (ALICE is), so finalize reverts
         // with `NotOwner`.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: key.into(),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .native_value(SUBMISSION_DEPOSIT)
             .transaction_limits(limits())
             .build_and_unwrap_result();
@@ -600,9 +670,12 @@ fn finalize_nonexistent_proposal_reverts() {
 
         // A hash that doesn't map to any stored proposal.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-            .data(Contract::finalizeCall {
-                proposalHash: B256::repeat_byte(0xFF),
-            }.abi_encode())
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: B256::repeat_byte(0xFF),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
 
@@ -629,12 +702,22 @@ fn approved_and_finalized() -> H160 {
     let key = proposal_key(&expected_proposal).unwrap();
 
     let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-        .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::approveCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .transaction_limits(limits())
         .build_and_unwrap_result();
 
     let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-        .data(Contract::finalizeCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::finalizeCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .native_value(SUBMISSION_DEPOSIT)
         .transaction_limits(limits())
         .build_and_unwrap_result();
@@ -658,7 +741,12 @@ fn approved_and_finalized() -> H160 {
 /// Fetch a proposal by key via the `proposal(bytes32)` view.
 fn fetch_proposal(addr: H160, key: [u8; 32]) -> Contract::Proposal {
     let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
-        .data(Contract::proposalCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::proposalCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .transaction_limits(limits())
         .build_and_unwrap_result();
     assert_eq!(result.flags, ReturnFlags::empty());
@@ -668,7 +756,12 @@ fn fetch_proposal(addr: H160, key: [u8; 32]) -> Contract::Proposal {
 /// BOB (the sole approver) approves the proposal, meeting `minApprovers: 1`.
 fn approve_by_bob(addr: H160, key: [u8; 32]) {
     let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-        .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::approveCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .transaction_limits(limits())
         .build_and_unwrap_result();
     assert_eq!(result.flags, ReturnFlags::empty());
@@ -681,7 +774,12 @@ fn finalize_as(
     key: [u8; 32],
 ) -> pallet_revive::ExecReturnValue {
     BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(signer), addr)
-        .data(Contract::finalizeCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::finalizeCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .native_value(SUBMISSION_DEPOSIT)
         .transaction_limits(limits())
         .build_and_unwrap_result()
@@ -694,7 +792,12 @@ fn close_as(
     key: [u8; 32],
 ) -> pallet_revive::ExecReturnValue {
     BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(signer), addr)
-        .data(Contract::closeCall { proposalHash: key.into() }.abi_encode())
+        .data(
+            Contract::closeCall {
+                proposalHash: key.into(),
+            }
+            .abi_encode(),
+        )
         .transaction_limits(limits())
         .build_and_unwrap_result()
 }
@@ -706,7 +809,10 @@ fn propose_starts_in_review() {
         let (addr, expected) = setup_with_proposal();
         let key = proposal_key(&expected).unwrap();
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Review);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Review
+        );
     });
 }
 
@@ -722,7 +828,10 @@ fn finalize_marks_submitted() {
         approve_by_bob(addr, key);
         assert_eq!(finalize_as(ALICE, addr, key).flags, ReturnFlags::empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Submitted
+        );
     });
 }
 
@@ -737,7 +846,10 @@ fn close_marks_closed() {
 
         assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Closed
+        );
 
         // Still listed by `allProposals`, now flagged as closed.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
@@ -793,7 +905,10 @@ fn close_by_non_owner_reverts() {
         assert_eq!(result.flags, ReturnFlags::REVERT);
         assert!(result.data.is_empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Review);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Review
+        );
     });
 }
 
@@ -823,7 +938,10 @@ fn close_twice_reverts() {
         assert_eq!(second.flags, ReturnFlags::REVERT);
         assert!(second.data.is_empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Closed
+        );
     });
 }
 
@@ -847,7 +965,10 @@ fn finalize_after_close_reverts() {
         assert!(result.data.is_empty());
 
         assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 0);
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Closed);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Closed
+        );
     });
 }
 
@@ -867,7 +988,10 @@ fn close_after_finalize_reverts() {
         assert_eq!(result.flags, ReturnFlags::REVERT);
         assert!(result.data.is_empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Submitted
+        );
     });
 }
 
@@ -884,7 +1008,12 @@ fn approve_after_close_reverts() {
         assert_eq!(close_as(ALICE, addr, key).flags, ReturnFlags::empty());
 
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
         assert_eq!(result.flags, ReturnFlags::REVERT);
@@ -910,13 +1039,21 @@ fn approve_after_finalize_reverts() {
         // The status guard runs before the approver/AlreadyApproved checks, so a
         // further approval by BOB (a valid approver) reverts on status alone.
         let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
-            .data(Contract::approveCall { proposalHash: key.into() }.abi_encode())
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
             .transaction_limits(limits())
             .build_and_unwrap_result();
         assert_eq!(result.flags, ReturnFlags::REVERT);
         assert!(result.data.is_empty());
 
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Submitted
+        );
     });
 }
 
@@ -939,7 +1076,10 @@ fn finalize_twice_reverts() {
 
         // No second referendum, and the status is unchanged.
         assert_eq!(pallet_referenda::ReferendumCount::<Test>::get(), 1);
-        assert_eq!(fetch_proposal(addr, key).status, Contract::ProposalStatus::Submitted);
+        assert_eq!(
+            fetch_proposal(addr, key).status,
+            Contract::ProposalStatus::Submitted
+        );
     });
 }
 
@@ -1004,7 +1144,10 @@ fn refund_reverts_and_preserves_tally_when_contract_is_short() {
         let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
 
         let tally_before = deposit_of(addr, Address::from(ALICE_ADDR.0));
-        assert!(tally_before > U256::ZERO, "precondition: ALICE has a recorded deposit");
+        assert!(
+            tally_before > U256::ZERO,
+            "precondition: ALICE has a recorded deposit"
+        );
 
         let alice_before = Balances::balance(&ALICE);
         let contract_free_before = Balances::balance(&contract_acct);
@@ -1024,7 +1167,11 @@ fn refund_reverts_and_preserves_tally_when_contract_is_short() {
         assert_eq!(result.flags, ReturnFlags::REVERT);
 
         // No funds moved...
-        assert_eq!(Balances::balance(&ALICE), alice_before, "caller balance must be unchanged");
+        assert_eq!(
+            Balances::balance(&ALICE),
+            alice_before,
+            "caller balance must be unchanged"
+        );
         assert_eq!(
             Balances::balance(&contract_acct),
             contract_free_before,
@@ -1114,7 +1261,10 @@ fn full_cycle_refund_from_passed_referendum() {
             RuntimeOrigin::signed(voter),
             0,
             AccountVote::Standard {
-                vote: Vote { aye: true, conviction: Conviction::Locked1x },
+                vote: Vote {
+                    aye: true,
+                    conviction: Conviction::Locked1x,
+                },
                 balance: voter_stake,
             },
         )
@@ -1124,7 +1274,12 @@ fn full_cycle_refund_from_passed_referendum() {
         // referendum's alarms — at prepare-end then confirm-end — carry it to
         // Approved.
         roll_relay_until(
-            || matches!(ReferendumInfoFor::<Test>::get(0), Some(ReferendumInfo::Approved(..))),
+            || {
+                matches!(
+                    ReferendumInfoFor::<Test>::get(0),
+                    Some(ReferendumInfo::Approved(..))
+                )
+            },
             10_000,
         );
 

@@ -18,8 +18,9 @@ sol! {
 
 /// XCM precompile address on Asset Hub. `AddressMatcher::Fixed(10)` resolves
 /// to `10 << 16 == 0xA0000` (confirmed in pallet-xcm precompile tests).
-pub const XCM_PRECOMPILE_ADDR: [u8; 20] =
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0A, 0, 0];
+pub const XCM_PRECOMPILE_ADDR: [u8; 20] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x0A, 0, 0,
+];
 
 /// Builds the `Referenda::submit` runtime call for a finalized proposal, wrapped
 /// in a local XCM `Transact` so it can be dispatched through Asset Hub's XCM

@@ -85,10 +85,7 @@ pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError
 
     let mut enc = Vec::with_capacity(MAX_PROPOSAL_BYTES);
     enc.extend_from_slice(b"Proposal:");
-    parity_scale_codec::Encode::encode_to(
-        &(prop.creator.0.0, prop.callHash.0),
-        &mut enc,
-    );
+    parity_scale_codec::Encode::encode_to(&(prop.creator.0.0, prop.callHash.0), &mut enc);
     let len = parity_scale_codec::Compact::<u32>(prop.approvers.len() as u32);
     parity_scale_codec::Encode::encode_to(&len, &mut enc);
 

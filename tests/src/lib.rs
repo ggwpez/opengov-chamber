@@ -11,7 +11,7 @@ pub use asset_hub_polkadot_runtime::{
 
 use cumulus_pallet_parachain_system::RelaychainDataProvider;
 use frame_support::traits::OnInitialize;
-use sp_runtime::{traits::BlockNumberProvider, AccountId32, BuildStorage};
+use sp_runtime::{AccountId32, BuildStorage, traits::BlockNumberProvider};
 
 /// Native balance type of Asset Hub (DOT has 10 decimals).
 pub type Balance = <Test as pallet_balances::Config>::Balance;
@@ -77,7 +77,10 @@ pub fn roll_relay_until(mut cond: impl FnMut() -> bool, max: RelayBlockNumber) {
         // `BlockNumberProvider`; the value passed is irrelevant.
         Scheduler::on_initialize(System::block_number());
     }
-    assert!(cond(), "referendum condition not met within {max} relay blocks");
+    assert!(
+        cond(),
+        "referendum condition not met within {max} relay blocks"
+    );
 }
 
 /// Solidity 4-byte selector: first 4 bytes of `keccak256(signature)`.

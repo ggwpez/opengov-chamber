@@ -4,10 +4,12 @@
 pub mod plumbing;
 
 use alloy_core::{
-    primitives::{keccak256, Address, FixedBytes, U256},
-    sol_types::{sol_data, EventTopic, SolCall, SolError, SolEvent, SolValue},
+    primitives::{Address, FixedBytes, U256, keccak256},
+    sol_types::{EventTopic, SolCall, SolError, SolEvent, SolValue, sol_data},
 };
-use contract::{Contract, ProposalError, expect_review, mark_closed, mark_submitted, proposal_key, xcm};
+use contract::{
+    Contract, ProposalError, expect_review, mark_closed, mark_submitted, proposal_key, xcm,
+};
 use pallet_revive_uapi::{CallFlags, HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
@@ -31,8 +33,9 @@ pub extern "C" fn call() {
 
     match selector {
         Contract::proposeCall::SELECTOR => {
-            let call: Contract::proposeCall = Contract::proposeCall::abi_decode_validate(&call_data)
-                .expect("Failed to decode propose call");
+            let call: Contract::proposeCall =
+                Contract::proposeCall::abi_decode_validate(&call_data)
+                    .expect("Failed to decode propose call");
             let prop = Contract::Proposal {
                 callHash: call.callHash,
                 callLen: call.callLen,
@@ -67,7 +70,7 @@ pub extern "C" fn call() {
         Contract::proposalCall::SELECTOR => {
             let proposal_call = Contract::proposalCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode proposal call");
-            
+
             let proposal = match get_proposal(&proposal_call.proposalHash) {
                 Some(p) => p,
                 None => api::return_value(ReturnFlags::REVERT, &[]),
@@ -79,7 +82,7 @@ pub extern "C" fn call() {
         Contract::approveCall::SELECTOR => {
             let approve_call = Contract::approveCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode approve call");
-            
+
             match approve_proposal(&approve_call.proposalHash) {
                 Ok(_) => (),
                 Err(_) => api::return_value(ReturnFlags::REVERT, &[]),
@@ -196,7 +199,11 @@ fn set_proposal(prop: &Contract::Proposal) {
 }
 
 fn set_all_proposal_keys(keys: &Vec<[u8; 32]>) {
-    api::set_storage(StorageFlags::empty(), ALL_PROPOSAL_KEYS_KEY, &keys.abi_encode());
+    api::set_storage(
+        StorageFlags::empty(),
+        ALL_PROPOSAL_KEYS_KEY,
+        &keys.abi_encode(),
+    );
 }
 
 fn get_all_proposal_keys() -> Vec<[u8; 32]> {

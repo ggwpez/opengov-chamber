@@ -1,4 +1,3 @@
-
 #[global_allocator]
 static mut ALLOC: picoalloc::Mutex<picoalloc::Allocator<picoalloc::ArrayPointer<16384>>> = {
     static mut ARRAY: picoalloc::Array<16384> = picoalloc::Array([0u8; 16384]);

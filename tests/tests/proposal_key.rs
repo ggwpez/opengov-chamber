@@ -24,11 +24,19 @@ fn proposal_key_changes_when_any_field_changes() {
 
     let mut p = base();
     p.callHash = B256::repeat_byte(0xBB);
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with callHash");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with callHash"
+    );
 
     let mut p = base();
     p.creator = Address::repeat_byte(0x99);
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with creator");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with creator"
+    );
 
     let mut p = base();
     p.approvers = vec![Address::repeat_byte(0x22), Address::repeat_byte(0x44)];
@@ -48,15 +56,27 @@ fn proposal_key_changes_when_any_field_changes() {
 
     let mut p = base();
     p.minApprovers = U256::from(1u64);
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with minApprovers");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with minApprovers"
+    );
 
     let mut p = base();
     p.callLen += 1;
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with callLen");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with callLen"
+    );
 
     let mut p = base();
     p.enactmentDelay += 1;
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with enactmentDelay");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with enactmentDelay"
+    );
 }
 
 #[test]
@@ -95,7 +115,10 @@ fn proposal_key_ignores_status() {
     // the lifecycle status must not influence the key.
     let base_key = proposal_key(&base()).unwrap();
 
-    for status in [Contract::ProposalStatus::Submitted, Contract::ProposalStatus::Closed] {
+    for status in [
+        Contract::ProposalStatus::Submitted,
+        Contract::ProposalStatus::Closed,
+    ] {
         let mut p = base();
         p.status = status;
         assert_eq!(
@@ -110,7 +133,10 @@ fn proposal_key_ignores_status() {
 fn proposal_key_errors_on_unsorted_approvers() {
     let mut p = base();
     p.approvers.reverse();
-    assert_eq!(proposal_key(&p), Err(ProposalError::ApproversNotStrictlySorted));
+    assert_eq!(
+        proposal_key(&p),
+        Err(ProposalError::ApproversNotStrictlySorted)
+    );
 }
 
 #[test]
@@ -118,7 +144,10 @@ fn proposal_key_errors_on_duplicate_approvers() {
     let mut p = base();
     let dup = Address::repeat_byte(0x22);
     p.approvers = vec![dup, dup];
-    assert_eq!(proposal_key(&p), Err(ProposalError::ApproversNotStrictlySorted));
+    assert_eq!(
+        proposal_key(&p),
+        Err(ProposalError::ApproversNotStrictlySorted)
+    );
 }
 
 #[test]

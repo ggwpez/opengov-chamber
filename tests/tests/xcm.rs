@@ -7,12 +7,10 @@
 //! match — so if the runtime ever renumbers a pallet, reorders `OriginCaller`,
 //! or bumps an XCM version, CI catches the drift here instead of on-chain.
 
-use asset_hub_polkadot_runtime::{
-    OriginCaller, RuntimeCall, governance::pallet_custom_origins,
-};
+use asset_hub_polkadot_runtime::{OriginCaller, RuntimeCall, governance::pallet_custom_origins};
 use codec::{Decode, Encode};
-use contract::xcm::{IXcm, referendum};
 use contract::sol_types::SolCall;
+use contract::xcm::{IXcm, referendum};
 use contract_tests::Test;
 use frame_support::traits::{Bounded, schedule::DispatchTime};
 use sp_core::H256;
@@ -87,8 +85,8 @@ fn execute_calldata_wraps_submit_call_in_transact() {
 
     // The `message` is a SCALE-encoded `VersionedXcm`; decode it with real XCM types.
     let message: Vec<u8> = decoded.message.to_vec();
-    let versioned = VersionedXcm::<()>::decode(&mut &message[..])
-        .expect("message must decode as VersionedXcm");
+    let versioned =
+        VersionedXcm::<()>::decode(&mut &message[..]).expect("message must decode as VersionedXcm");
 
     let xcm = match versioned {
         VersionedXcm::V5(xcm) => xcm,
@@ -99,9 +97,7 @@ fn execute_calldata_wraps_submit_call_in_transact() {
     assert_eq!(xcm.0.len(), 1, "expected a single-instruction XCM");
     match &xcm.0[0] {
         Instruction::Transact {
-            origin_kind,
-            call,
-            ..
+            origin_kind, call, ..
         } => {
             assert_eq!(*origin_kind, OriginKind::SovereignAccount);
 
@@ -153,8 +149,8 @@ fn assert_covers(label: &str, granted: Weight, need: Weight) {
 /// the contract emits (not the consts) so this tests what really gets dispatched.
 #[test]
 fn hardcoded_weights_cover_runtime_cost_with_bounded_headroom() {
-    use pallet_referenda::WeightInfo;
     use asset_hub_polkadot_runtime::xcm_config::XcmConfig;
+    use pallet_referenda::WeightInfo;
     use xcm_executor::{Config, traits::WeightBounds};
 
     let calldata = referendum::build_execute_calldata(&[0xAA; 32], PREIMAGE_LEN, ENACTMENT_DELAY);
@@ -181,13 +177,16 @@ fn hardcoded_weights_cover_runtime_cost_with_bounded_headroom() {
     // dispatched call when it can't be decoded — must cover the real
     // `Referenda::submit` weight from the runtime's configured `WeightInfo`.
     let submit = <Test as pallet_referenda::Config>::WeightInfo::submit();
-    let VersionedXcm::V5(xcm) = VersionedXcm::<()>::decode(&mut &message[..])
-        .expect("message must decode as VersionedXcm")
+    let VersionedXcm::V5(xcm) =
+        VersionedXcm::<()>::decode(&mut &message[..]).expect("message must decode as VersionedXcm")
     else {
         panic!("expected XCM v5");
     };
     match &xcm.0[0] {
-        Instruction::Transact { fallback_max_weight, .. } => {
+        Instruction::Transact {
+            fallback_max_weight,
+            ..
+        } => {
             let fallback =
                 fallback_max_weight.expect("contract sets fallback_max_weight: Some(..)");
             assert_covers("Transact fallback_max_weight", fallback, submit);
