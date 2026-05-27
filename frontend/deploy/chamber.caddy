@@ -1,0 +1,25 @@
+# Production Caddy site config for the Chamber dApp, deployed by `just frontend-deploy`
+# into the server's /etc/caddy/sites/ (imported by /etc/caddy/Caddyfile). This is the
+# canonical, version-controlled copy. For LOCAL preview use ../Caddyfile (a :3000 block,
+# no TLS) via `just frontend-serve-caddy`.
+chamber.tasty.limo {
+	root * /srv/chamber/out
+	encode zstd gzip
+	file_server
+
+	# Next's hashed assets are content-addressed and never change — cache them hard.
+	# HTML stays uncached (default) so a redeploy is picked up immediately.
+	@immutable path /_next/static/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# Serve the exported 404 page for unknown paths.
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+
+	log {
+		output stderr
+		format console
+	}
+}

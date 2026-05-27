@@ -67,6 +67,37 @@ Three layers, all runnable without a wallet or a deployed contract:
   are the component layer's job; see the caveats below for why a real `finalize` E2E on Paseo
   wouldn't be meaningful anyway.
 
+## 4. Production (static)
+
+The app is fully client-side, so `output: 'export'` (in `next.config.mjs`) makes
+`next build` emit a static site to `out/` — no Node runtime to serve it.
+
+```bash
+just frontend-env 0x…   # bake the contract address + rpc into the build (NEXT_PUBLIC_*)
+just frontend-build      # -> frontend/out/   (a plain static bundle)
+just frontend-serve      # build + preview at http://localhost:3000 via `npx serve`
+```
+
+Deploy `out/` to any static host (nginx, S3 + CloudFront, GitHub Pages, …). Note the
+`NEXT_PUBLIC_*` values are **inlined at build time**, so re-run `frontend-build` after
+pointing at a different contract or RPC.
+
+### Deploy to the server (chamber.tasty.limo)
+
+`just frontend-deploy` ships the build to the project server over ssh/rsync. The server runs
+Caddy with a multi-file `import sites/*.caddy` layout; this app is one site,
+`deploy/chamber.caddy` (installed to `/etc/caddy/sites/chamber.caddy`), serving
+`/srv/chamber/out` as static files with auto-TLS.
+
+```bash
+just frontend-env 0x… https://eth-rpc.polkadot.io/   # bake the TARGET network's config
+just frontend-deploy                                  # build + rsync out/ + reload caddy
+```
+
+Because `NEXT_PUBLIC_*` is baked at build time, **always run `frontend-env` for the intended
+network first** — `frontend-deploy` rebuilds from whatever `.env.local` currently holds.
+Requires a DNS `A` record `chamber.tasty.limo → <server>` for Caddy to issue the certificate.
+
 ## Notes / caveats
 
 - **`finalize` is payable** — it forwards ~10 PAS (the `SubmissionDeposit`, EVM-denominated

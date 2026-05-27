@@ -102,3 +102,42 @@ frontend-install:
 # Start the frontend dev server (http://localhost:3000).
 dev:
     cd frontend && npm run dev
+
+# Run the frontend Vitest suite (unit + component tests). No wallet/node needed.
+frontend-test:
+    cd frontend && npm test
+
+# Build the frontend into a static site at frontend/out/ (next export). The
+# NEXT_PUBLIC_* env (contract address, rpc) is baked in at build time, so run
+# `just frontend-env <addr>` first. Serve out/ from any static host — no Node.
+frontend-build:
+    cd frontend && npm run build
+
+# Preview the static build locally at http://localhost:3000.
+frontend-serve: frontend-build
+    cd frontend && npx --yes serve@latest out -l 3000
+
+# Serve the static build with Caddy (frontend/Caddyfile) at http://localhost:3000.
+frontend-serve-caddy: frontend-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v caddy >/dev/null || { echo "✖ caddy not found — https://caddyserver.com/docs/install"; exit 1; }
+    cd frontend && caddy run --config Caddyfile
+
+# Deploy the static build to the server (chamber.tasty.limo) over ssh/rsync. Serves
+# from /srv/chamber/out via Caddy's import layout (sites/chamber.caddy). NOTE: the
+# NEXT_PUBLIC_* values are baked in at build time, so run `just frontend-env <addr> <rpc>`
+# for the target network BEFORE deploying. Requires DNS A chamber.tasty.limo -> the host.
+frontend-deploy host="server": frontend-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "▸ ensuring web root on {{host}}"
+    ssh {{host}} 'sudo mkdir -p /srv/chamber && sudo chown "$(id -un):$(id -gn)" /srv/chamber'
+    echo "▸ syncing frontend/out/ → {{host}}:/srv/chamber/out/"
+    rsync -az --delete -e ssh frontend/out/ {{host}}:/srv/chamber/out/
+    echo "▸ installing site config → /etc/caddy/sites/chamber.caddy"
+    rsync -az -e ssh frontend/deploy/chamber.caddy {{host}}:/tmp/chamber.caddy
+    ssh {{host}} 'sudo install -m644 /tmp/chamber.caddy /etc/caddy/sites/chamber.caddy && rm -f /tmp/chamber.caddy'
+    echo "▸ validating + reloading caddy"
+    ssh {{host}} 'sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy'
+    echo "✔ deployed — https://chamber.tasty.limo/"

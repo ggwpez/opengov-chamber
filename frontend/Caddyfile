@@ -1,0 +1,27 @@
+# LOCAL PREVIEW Caddy config for the static export (frontend/out/) produced by
+# `just frontend-build`. The site is a plain prerendered bundle — no Node runtime.
+#
+#   just frontend-build                 # emit out/
+#   caddy run --config Caddyfile        # serve at http://localhost:3000
+#
+# For PRODUCTION (chamber.tasty.limo, real TLS) the canonical site config is
+# deploy/chamber.caddy, shipped to the server by `just frontend-deploy`. This file
+# is only for local preview.
+
+:3000 {
+	root * out
+	encode gzip zstd
+	file_server
+
+	# Next's hashed assets under _next/static are content-addressed and never
+	# change, so cache them hard. HTML stays uncached (default) so a redeploy is
+	# picked up immediately.
+	@immutable path /_next/static/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# Serve the exported 404 page for unknown paths.
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}
