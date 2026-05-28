@@ -8,6 +8,7 @@ import { contractAbi, DispatchTimeKind, ProposalStatus, Track, type Proposal } f
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
+import { explorerPreimageUrl } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 import { useActiveAccount } from '@/lib/activeAccount';
 
@@ -91,7 +92,19 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
     >
       <div className="card-head">
         <div>
-          <div className={`card-hash ${isClosed ? 'struck' : ''}`}>Call hash: {proposal.callHash}</div>
+          <div className={`card-hash ${isClosed ? 'struck' : ''}`}>
+            Call hash:{' '}
+            {(() => {
+              const url = explorerPreimageUrl(proposal.callHash);
+              return url ? (
+                <a href={url} target="_blank" rel="noreferrer" className="addr-link">
+                  {proposal.callHash}
+                </a>
+              ) : (
+                proposal.callHash
+              );
+            })()}
+          </div>
         </div>
         <span className={`tag ${statusTag.cls}`} title={statusTag.title}>
           {statusTag.label}

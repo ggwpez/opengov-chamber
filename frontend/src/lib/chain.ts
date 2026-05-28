@@ -4,15 +4,20 @@ const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ?? 'https://eth-rpc-testnet.polkadot.io/';
 
 /**
- * Optional block explorer base URL (e.g. https://blockscout-testnet.polkadot.io).
+ * Optional block explorer base URL (e.g. https://assethub-paseo.subscan.io).
  * Left unset → no explorer links anywhere. Trailing slash stripped so callers
- * can append `/address/…` or `/tx/…` cleanly.
+ * can append `/account/…` or `/preimage/…` cleanly.
  */
 export const EXPLORER_URL = process.env.NEXT_PUBLIC_EXPLORER_URL?.replace(/\/$/, '') || undefined;
 
-/** Build an explorer link for an address, or `undefined` if no explorer is set. */
+/** Build an explorer link for an account address, or `undefined` if no explorer is set. */
 export function explorerAddressUrl(address: string): string | undefined {
-  return EXPLORER_URL ? `${EXPLORER_URL}/address/${address}` : undefined;
+  return EXPLORER_URL ? `${EXPLORER_URL}/account/${address}` : undefined;
+}
+
+/** Build an explorer link for a preimage / call hash, or `undefined` if no explorer is set. */
+export function explorerPreimageUrl(hash: string): string | undefined {
+  return EXPLORER_URL ? `${EXPLORER_URL}/preimage/${hash}` : undefined;
 }
 
 /**
@@ -33,7 +38,7 @@ export const paseoHub = defineChain({
   // Only declare an explorer when NEXT_PUBLIC_EXPLORER_URL is set; otherwise
   // tooling (and our own UI) should render no outbound links.
   ...(EXPLORER_URL
-    ? { blockExplorers: { default: { name: 'Blockscout', url: EXPLORER_URL } } }
+    ? { blockExplorers: { default: { name: 'Subscan', url: EXPLORER_URL } } }
     : {}),
   testnet: true,
 });
