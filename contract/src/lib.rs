@@ -95,7 +95,7 @@ pub fn proposal_key(prop: &Contract::Proposal) -> Result<[u8; 32], ProposalError
     }
 
     // The codec's identity prefix already covers (in order) callHash, callLen,
-    // enactmentDelay, creator, approvers, minApprovers — every field that
+    // enactment, track, creator, approvers, minApprovers — every field that
     // makes a proposal "the same proposal" — plus the version byte so a
     // future on-storage format bump partitions key space cleanly.
     // The guards above mirror the codec's, so this can't fail in practice.

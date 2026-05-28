@@ -32,6 +32,7 @@ pub const XCM_PRECOMPILE_ADDR: [u8; 20] = [
 /// pallet indices to the current Asset Hub `construct_runtime!`.
 pub mod referendum {
     use super::IXcm;
+    use crate::Contract;
     use alloc::vec::Vec;
     use alloy_core::sol_types::SolCall;
     use parity_scale_codec::{Compact, Encode};
@@ -41,8 +42,13 @@ pub mod referendum {
     /// `Referenda::submit` is `#[pallet::call_index(0)]`.
     const REFERENDA_SUBMIT_CALL_INDEX: u8 = 0;
 
-    /// `OriginCaller::Origins` variant — `construct_runtime!` numbers `OriginCaller`
-    /// variants by pallet index, and `pallet_custom_origins` is index 63 on Asset Hub.
+    /// `OriginCaller::system` variant — `construct_runtime!` numbers `OriginCaller`
+    /// variants by pallet index, and `frame_system` is index 0 on Asset Hub.
+    const SYSTEM_VARIANT_INDEX: u8 = 0;
+    /// `frame_system::RawOrigin::Root` — the 1st (index 0) variant of `RawOrigin`.
+    const RAW_ORIGIN_ROOT_INDEX: u8 = 0;
+
+    /// `OriginCaller::Origins` variant — `pallet_custom_origins` is index 63 on Asset Hub.
     const ORIGINS_VARIANT_INDEX: u8 = 63;
     /// `pallet_custom_origins::Origin::WhitelistedCaller` — the 14th (index 13)
     /// variant in that pallet's `Origin` enum.
@@ -79,36 +85,64 @@ pub mod referendum {
     pub const XCM_EXEC_REF_TIME: u64 = 1_100_000_000;
     pub const XCM_EXEC_PROOF_SIZE: u64 = 220_000;
 
+    /// SCALE-encode the `proposal_origin: Box<OriginCaller>` for `track`.
+    ///   `Root`              → `OriginCaller::system(RawOrigin::Root)`.
+    ///   `WhitelistedCaller` → `OriginCaller::Origins(Origin::WhitelistedCaller)`.
+    fn encode_proposal_origin(track: &Contract::Track, out: &mut Vec<u8>) {
+        match track {
+            Contract::Track::Root => {
+                out.push(SYSTEM_VARIANT_INDEX);
+                out.push(RAW_ORIGIN_ROOT_INDEX);
+            }
+            // Default the alloy `__Invalid` catch-all to WhitelistedCaller; the
+            // codec already rejects an out-of-range track before it reaches here.
+            _ => {
+                out.push(ORIGINS_VARIANT_INDEX);
+                out.push(WHITELISTED_CALLER_ORIGIN_INDEX);
+            }
+        }
+    }
+
+    /// SCALE-encode `enactment_moment: DispatchTime<BlockNumber>`.
+    ///   `At(block)`    → variant 0, `After(block)` → variant 1.
+    fn encode_dispatch_time(enactment: &Contract::DispatchTime, out: &mut Vec<u8>) {
+        let variant = match enactment.kind {
+            Contract::DispatchTimeKind::At => 0x00,
+            // The codec rejects `__Invalid`; treat anything else as `After`.
+            _ => 0x01,
+        };
+        out.push(variant);
+        out.extend_from_slice(&enactment.block.to_le_bytes());
+    }
+
     /// SCALE-encode `RuntimeCall::Referenda(submit { .. })` referencing `call_hash`
     /// as a preimage lookup.
     ///
     /// `preimage_len` is the encoded byte length of the preimage `call_hash`
-    /// points at (`Bounded::Lookup { hash, len }`), and `enactment_delay` is the
-    /// number of blocks to wait after the referendum passes
-    /// (`DispatchTime::After(enactment_delay)`). Both come from the proposal.
+    /// points at (`Bounded::Lookup { hash, len }`); `enactment` is when the
+    /// passed referendum's call runs (`DispatchTime`); `track` selects the
+    /// governance origin the referendum is submitted under. All come from the
+    /// proposal.
     pub fn encode_submit_call(
         call_hash: &[u8; 32],
         preimage_len: u32,
-        enactment_delay: u32,
+        enactment: &Contract::DispatchTime,
+        track: &Contract::Track,
     ) -> Vec<u8> {
         let mut call = Vec::new();
         call.push(REFERENDA_PALLET_INDEX);
         call.push(REFERENDA_SUBMIT_CALL_INDEX);
 
         // proposal_origin: Box<OriginCaller>.
-        // `OriginCaller::Origins(pallet_custom_origins::Origin::WhitelistedCaller)`
-        // — the governance track for dispatching whitelisted calls.
-        call.push(ORIGINS_VARIANT_INDEX);
-        call.push(WHITELISTED_CALLER_ORIGIN_INDEX);
+        encode_proposal_origin(track, &mut call);
 
         // proposal: Bounded::Lookup { hash, len } (variant index 2).
         call.push(0x02);
         call.extend_from_slice(call_hash);
         call.extend_from_slice(&preimage_len.to_le_bytes());
 
-        // enactment_moment: DispatchTime::After(n) (variant index 1).
-        call.push(0x01);
-        call.extend_from_slice(&enactment_delay.to_le_bytes());
+        // enactment_moment: DispatchTime.
+        encode_dispatch_time(enactment, &mut call);
 
         call
     }
@@ -137,13 +171,14 @@ pub mod referendum {
     }
 
     /// Build the full `IXcm.execute` calldata for finalizing `call_hash` into a
-    /// referendum. See [`encode_submit_call`] for `preimage_len`/`enactment_delay`.
+    /// referendum. See [`encode_submit_call`] for `preimage_len`/`enactment`/`track`.
     pub fn build_execute_calldata(
         call_hash: &[u8; 32],
         preimage_len: u32,
-        enactment_delay: u32,
+        enactment: &Contract::DispatchTime,
+        track: &Contract::Track,
     ) -> Vec<u8> {
-        let call = encode_submit_call(call_hash, preimage_len, enactment_delay);
+        let call = encode_submit_call(call_hash, preimage_len, enactment, track);
         let message = encode_xcm_transact(&call);
 
         IXcm::executeCall {

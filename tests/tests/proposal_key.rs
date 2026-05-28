@@ -4,7 +4,11 @@ fn base() -> Contract::Proposal {
     Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
         callLen: 42,
-        enactmentDelay: 100,
+        enactment: Contract::DispatchTime {
+            kind: Contract::DispatchTimeKind::After,
+            block: 100,
+        },
+        track: Contract::Track::WhitelistedCaller,
         creator: Address::repeat_byte(0x11),
         approvers: vec![Address::repeat_byte(0x22), Address::repeat_byte(0x33)],
         minApprovers: U256::from(2u64),
@@ -71,12 +75,24 @@ fn proposal_key_changes_when_any_field_changes() {
     );
 
     let mut p = base();
-    p.enactmentDelay += 1;
+    p.enactment.block += 1;
     assert_ne!(
         proposal_key(&p).unwrap(),
         base_key,
-        "key must change with enactmentDelay"
+        "key must change with enactment.block"
     );
+
+    let mut p = base();
+    p.enactment.kind = Contract::DispatchTimeKind::At;
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with enactment.kind"
+    );
+
+    let mut p = base();
+    p.track = Contract::Track::Root;
+    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with track");
 }
 
 #[test]
@@ -173,7 +189,11 @@ fn proposal_key_handles_zero_values() {
     let p = Contract::Proposal {
         callHash: B256::ZERO,
         callLen: 0,
-        enactmentDelay: 0,
+        enactment: Contract::DispatchTime {
+            kind: Contract::DispatchTimeKind::At,
+            block: 0,
+        },
+        track: Contract::Track::Root,
         creator: Address::ZERO,
         approvers: vec![],
         minApprovers: U256::ZERO,
@@ -188,7 +208,11 @@ fn proposal_key_handles_max_values() {
     let p = Contract::Proposal {
         callHash: B256::repeat_byte(0xFF),
         callLen: u32::MAX,
-        enactmentDelay: u32::MAX,
+        enactment: Contract::DispatchTime {
+            kind: Contract::DispatchTimeKind::After,
+            block: u32::MAX,
+        },
+        track: Contract::Track::WhitelistedCaller,
         creator: Address::ZERO,
         approvers: vec![Address::repeat_byte(0xFF)],
         minApprovers: U256::from(1u64),
@@ -232,9 +256,9 @@ fn proposal_key_golden_hash() {
     // changes, every already-stored proposal becomes unreachable — update only
     // with intent (e.g. bumping `codec::VERSION`).
     let expected: [u8; 32] = [
-        0x0f, 0x5d, 0x2f, 0xdb, 0xb6, 0xbd, 0xdc, 0x36, 0x1b, 0xb5, 0x10, 0x63, 0xe8, 0x0f, 0xeb,
-        0xde, 0x24, 0x71, 0xdc, 0x33, 0xe6, 0x50, 0x88, 0xc7, 0xb4, 0xbf, 0xa4, 0x57, 0xed, 0xea,
-        0x87, 0x2d,
+        0x22, 0x05, 0x87, 0x40, 0x84, 0xb7, 0xd4, 0x37, 0xa3, 0x69, 0x36, 0x26, 0x92, 0x57, 0x0f,
+        0x45, 0x91, 0x88, 0x6f, 0x25, 0x5c, 0x23, 0xa8, 0x51, 0x0d, 0x85, 0x5e, 0x68, 0x38, 0x17,
+        0xac, 0x23,
     ];
     assert_eq!(key, expected, "got: {:02x?}", key);
 }

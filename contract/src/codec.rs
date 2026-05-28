@@ -5,7 +5,7 @@
 //! bytes — colliding with pallet-revive's per-value storage cap of 416 B
 //! ([`pallet_revive::limits::STORAGE_BYTES`]) at just N+M = 2. This codec
 //! drops the padding for the bytes that actually hit `api::set_storage`,
-//! shrinking the same data to `65 + 20·(N+M)` and lifting the cap to N+M ≤ 17.
+//! shrinking the same data to `67 + 20·(N+M)` and lifting the cap to N+M ≤ 17.
 //!
 //! The Solidity ABI is still the wire format on `propose` / `proposal` /
 //! `allProposals` / events — only the in-storage blob is packed. Mirror this
@@ -18,9 +18,11 @@
 //!    0   1    version (== VERSION)
 //!    1   32   callHash
 //!   33   4    callLen
-//!   37   4    enactmentDelay
-//!   41   20   creator
-//!   61   1    N = approvers.len()       (≤ 255)
+//!   37   1    enactment.kind            (0=At, 1=After)
+//!   38   4    enactment.block
+//!   42   1    track                     (0=Root, 1=WhitelistedCaller)
+//!   43   20   creator
+//!   63   1    N = approvers.len()       (≤ 255)
 //!   ..  20·N  approvers
 //!    .   1    minApprovers              (≤ N, so always fits in u8)
 //!    .   1    M = approvedBy.len()      (≤ N)
@@ -32,13 +34,16 @@ use crate::Contract;
 use alloc::vec::Vec;
 use alloy_core::primitives::{Address, FixedBytes, U256};
 
-/// Bumped whenever the on-storage layout changes incompatibly.
-pub const VERSION: u8 = 0x01;
+/// Bumped whenever the on-storage layout changes incompatibly. `0x02` added the
+/// packed `enactment` (kind + block) and `track` fields, replacing the bare
+/// `enactmentDelay` u32 of `0x01`.
+pub const VERSION: u8 = 0x02;
 
 /// Smallest blob the codec can produce: a proposal with no approvers / votes.
 pub const MIN_ENCODED_LEN: usize = MIN_IDENTITY_LEN + 1 + 1;
 /// Smallest identity prefix: an [`encode_identity`] output with zero approvers.
-pub const MIN_IDENTITY_LEN: usize = 1 + 32 + 4 + 4 + 20 + 1 + 1;
+/// version + callHash + callLen + enactment(kind+block) + track + creator + N + min.
+pub const MIN_IDENTITY_LEN: usize = 1 + 32 + 4 + (1 + 4) + 1 + 20 + 1 + 1;
 /// Pallet-revive caps a single storage value at this many bytes.
 pub const MAX_ENCODED_LEN: usize = 416;
 /// Hard cap on `approvers.len()` for any proposal accepted by the contract.
@@ -61,6 +66,10 @@ pub enum CodecError {
     UnknownVersion(u8),
     /// Status byte wasn't 0/1/2.
     BadStatus(u8),
+    /// `enactment.kind` byte wasn't 0/1.
+    BadDispatchKind(u8),
+    /// `track` byte wasn't 0/1.
+    BadTrack(u8),
     /// `minApprovers` (a `uint256` at the ABI boundary) didn't fit in a `u8`,
     /// or `approvers.len()` / `approvedBy.len()` did not either.
     LenOverflow,
@@ -79,23 +88,23 @@ pub enum CodecError {
 /// identity: a proposal that gains an approval or transitions
 /// `Review → Submitted` must still hash to the same key.
 pub fn encode_identity(prop: &Contract::Proposal) -> Result<Vec<u8>, CodecError> {
-    let (n, min) = validate_identity(prop)?;
-    let mut out = Vec::with_capacity(MIN_IDENTITY_LEN + 20 * usize::from(n));
-    write_identity(&mut out, prop, n, min);
+    let id = validate_identity(prop)?;
+    let mut out = Vec::with_capacity(MIN_IDENTITY_LEN + 20 * usize::from(id.n));
+    write_identity(&mut out, prop, id);
     Ok(out)
 }
 
 pub fn encode(prop: &Contract::Proposal) -> Result<Vec<u8>, CodecError> {
-    let (n, min) = validate_identity(prop)?;
+    let id = validate_identity(prop)?;
     let m = u8::try_from(prop.approvedBy.len()).map_err(|_| CodecError::LenOverflow)?;
 
-    let size = MIN_ENCODED_LEN + 20 * (usize::from(n) + usize::from(m));
+    let size = MIN_ENCODED_LEN + 20 * (usize::from(id.n) + usize::from(m));
     if size > MAX_ENCODED_LEN {
         return Err(CodecError::TooLarge);
     }
 
     let mut out = Vec::with_capacity(size);
-    write_identity(&mut out, prop, n, min);
+    write_identity(&mut out, prop, id);
     out.push(m);
     for a in prop.approvedBy.iter() {
         out.extend_from_slice(a.as_slice());
@@ -105,30 +114,42 @@ pub fn encode(prop: &Contract::Proposal) -> Result<Vec<u8>, CodecError> {
     Ok(out)
 }
 
-/// Shared validation for the identity-bearing fields. Returns the validated
-/// `(approvers_len, minApprovers)` as `u8`s so the writer doesn't recheck.
-fn validate_identity(prop: &Contract::Proposal) -> Result<(u8, u8), CodecError> {
+/// The validated, pre-encoded identity scalars, so the writer doesn't recheck.
+struct Identity {
+    n: u8,
+    min: u8,
+    kind: u8,
+    track: u8,
+}
+
+/// Shared validation for the identity-bearing fields. Validates the enum
+/// discriminants and array bounds and returns their encoded bytes.
+fn validate_identity(prop: &Contract::Proposal) -> Result<Identity, CodecError> {
     let n = u8::try_from(prop.approvers.len()).map_err(|_| CodecError::LenOverflow)?;
     let min = u256_to_u8(prop.minApprovers).ok_or(CodecError::LenOverflow)?;
     if min > n {
         return Err(CodecError::MinApproversTooHigh);
     }
-    Ok((n, min))
+    let kind = encode_dispatch_kind(&prop.enactment.kind)?;
+    let track = encode_track(&prop.track)?;
+    Ok(Identity { n, min, kind, track })
 }
 
 /// Append the identity prefix to `out`. Caller must have validated via
 /// [`validate_identity`] so this can't fail.
-fn write_identity(out: &mut Vec<u8>, prop: &Contract::Proposal, n: u8, min: u8) {
+fn write_identity(out: &mut Vec<u8>, prop: &Contract::Proposal, id: Identity) {
     out.push(VERSION);
     out.extend_from_slice(prop.callHash.as_slice());
     out.extend_from_slice(&prop.callLen.to_le_bytes());
-    out.extend_from_slice(&prop.enactmentDelay.to_le_bytes());
+    out.push(id.kind);
+    out.extend_from_slice(&prop.enactment.block.to_le_bytes());
+    out.push(id.track);
     out.extend_from_slice(prop.creator.as_slice());
-    out.push(n);
+    out.push(id.n);
     for a in prop.approvers.iter() {
         out.extend_from_slice(a.as_slice());
     }
-    out.push(min);
+    out.push(id.min);
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Contract::Proposal, CodecError> {
@@ -140,7 +161,9 @@ pub fn decode(bytes: &[u8]) -> Result<Contract::Proposal, CodecError> {
     }
     let call_hash = c.read_b256()?;
     let call_len = c.read_u32_le()?;
-    let enactment_delay = c.read_u32_le()?;
+    let enactment_kind = decode_dispatch_kind(c.read_u8()?)?;
+    let enactment_block = c.read_u32_le()?;
+    let track = decode_track(c.read_u8()?)?;
     let creator = c.read_address()?;
 
     let n = c.read_u8()?;
@@ -168,7 +191,11 @@ pub fn decode(bytes: &[u8]) -> Result<Contract::Proposal, CodecError> {
     Ok(Contract::Proposal {
         callHash: call_hash,
         callLen: call_len,
-        enactmentDelay: enactment_delay,
+        enactment: Contract::DispatchTime {
+            kind: enactment_kind,
+            block: enactment_block,
+        },
+        track,
         creator,
         approvers,
         minApprovers: U256::from(min),
@@ -194,6 +221,42 @@ fn decode_status(b: u8) -> Result<Contract::ProposalStatus, CodecError> {
         1 => Contract::ProposalStatus::Submitted,
         2 => Contract::ProposalStatus::Closed,
         x => return Err(CodecError::BadStatus(x)),
+    })
+}
+
+/// SCALE/storage discriminant of `DispatchTime::kind`. Matches Substrate's
+/// `DispatchTime` variant indices (`At = 0`, `After = 1`).
+fn encode_dispatch_kind(k: &Contract::DispatchTimeKind) -> Result<u8, CodecError> {
+    match k {
+        Contract::DispatchTimeKind::At => Ok(0),
+        Contract::DispatchTimeKind::After => Ok(1),
+        // alloy's `sol!` adds a catch-all `__Invalid = u8::MAX`; refuse it.
+        other => Err(CodecError::BadDispatchKind(*other as u8)),
+    }
+}
+
+fn decode_dispatch_kind(b: u8) -> Result<Contract::DispatchTimeKind, CodecError> {
+    Ok(match b {
+        0 => Contract::DispatchTimeKind::At,
+        1 => Contract::DispatchTimeKind::After,
+        x => return Err(CodecError::BadDispatchKind(x)),
+    })
+}
+
+/// Storage discriminant of `Track` (`Root = 0`, `WhitelistedCaller = 1`).
+fn encode_track(t: &Contract::Track) -> Result<u8, CodecError> {
+    match t {
+        Contract::Track::Root => Ok(0),
+        Contract::Track::WhitelistedCaller => Ok(1),
+        other => Err(CodecError::BadTrack(*other as u8)),
+    }
+}
+
+fn decode_track(b: u8) -> Result<Contract::Track, CodecError> {
+    Ok(match b {
+        0 => Contract::Track::Root,
+        1 => Contract::Track::WhitelistedCaller,
+        x => return Err(CodecError::BadTrack(x)),
     })
 }
 

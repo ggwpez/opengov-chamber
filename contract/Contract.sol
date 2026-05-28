@@ -12,12 +12,36 @@ interface Contract {
         Closed
     }
 
+    // When an enacted referendum's call runs, mirroring Substrate's
+    // `DispatchTime`. Variant indices match its SCALE encoding:
+    //   At:    at absolute block number `block`.
+    //   After: `block` blocks after the referendum is confirmed.
+    enum DispatchTimeKind {
+        At,
+        After
+    }
+
+    struct DispatchTime {
+        DispatchTimeKind kind;
+        // Absolute target block for `At`; number of blocks to wait for `After`.
+        uint32 block;
+    }
+
+    // Governance track the contract submits the referendum to.
+    //   Root:              the Root origin track.
+    //   WhitelistedCaller: the whitelisted-call track (pallet_custom_origins).
+    enum Track {
+        Root,
+        WhitelistedCaller
+    }
+
     struct Proposal {
         // Entry into the preimages pallet
         bytes32 callHash;
         uint32 callLen;
 
-        uint32 enactmentDelay;
+        DispatchTime enactment;
+        Track track;
 
         address creator;
 
@@ -44,7 +68,7 @@ interface Contract {
     // Total funds the contract still owes `depositor`, accumulated across their `finalize` calls.
     function deposits(address depositor) external view returns (uint256);
 
-    function propose(bytes32 callHash, uint32 callLen, uint32 enactmentDelay, address[] memory approvers, uint256 minApprovers) external;
+    function propose(bytes32 callHash, uint32 callLen, DispatchTime memory enactment, Track track, address[] memory approvers, uint256 minApprovers) external;
     function approve(bytes32 proposalHash) external;
     function finalize(bytes32 proposalHash) external payable;
     function close(bytes32 proposalHash) external;

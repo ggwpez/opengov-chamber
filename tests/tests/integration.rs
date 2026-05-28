@@ -45,10 +45,15 @@ fn blob_size_is_sane() {
 /// Returns the contract address and the proposal that was created.
 fn setup_with_proposal() -> (H160, Contract::Proposal) {
     fund(&ALICE, ENDOWMENT);
+    let enactment = Contract::DispatchTime {
+        kind: Contract::DispatchTimeKind::After,
+        block: 100,
+    };
     let expected_proposal = Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
         callLen: 42,
-        enactmentDelay: 100,
+        enactment: enactment.clone(),
+        track: Contract::Track::WhitelistedCaller,
         creator: Address::from(ALICE_ADDR.0),
         approvers: vec![Address::from(BOB_ADDR.0)],
         minApprovers: contract::U256::from(1u64),
@@ -69,7 +74,8 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
             Contract::proposeCall {
                 callHash: B256::repeat_byte(0xAA),
                 callLen: 42,
-                enactmentDelay: 100,
+                enactment,
+                track: Contract::Track::WhitelistedCaller,
                 approvers: vec![Address::from(BOB_ADDR.0)],
                 minApprovers: contract::U256::from(1u64),
             }
@@ -130,7 +136,11 @@ fn proposing_twice_errors() {
                 Contract::proposeCall {
                     callHash: B256::repeat_byte(0xAA),
                     callLen: 42,
-                    enactmentDelay: 100,
+                    enactment: Contract::DispatchTime {
+                        kind: Contract::DispatchTimeKind::After,
+                        block: 100,
+                    },
+                    track: Contract::Track::WhitelistedCaller,
                     approvers: vec![Address::from(BOB_ADDR.0)],
                     minApprovers: contract::U256::from(1u64),
                 }

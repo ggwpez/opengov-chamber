@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ProposalCard } from './ProposalCard';
-import { ProposalStatus, type Proposal } from '@/lib/abi';
+import { DispatchTimeKind, ProposalStatus, Track, type Proposal } from '@/lib/abi';
 import { proposalKey } from '@/lib/proposalKey';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 
@@ -35,7 +35,8 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
   return {
     callHash: ('0x' + 'aa'.repeat(32)) as `0x${string}`,
     callLen: 42,
-    enactmentDelay: 100,
+    enactment: { kind: DispatchTimeKind.After, block: 100 },
+    track: Track.WhitelistedCaller,
     creator: CREATOR,
     approvers: [APPROVER_A, APPROVER_B],
     minApprovers: 2n,

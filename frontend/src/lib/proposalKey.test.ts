@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ProposalStatus, type Proposal } from './abi';
+import { DispatchTimeKind, ProposalStatus, Track, type Proposal } from './abi';
 import { proposalKey } from './proposalKey';
 
 /**
@@ -7,7 +7,8 @@ import { proposalKey } from './proposalKey';
  * the two key derivations can be checked against the *same* fixture.
  *   callHash      = 0xAA * 32
  *   callLen       = 42
- *   enactmentDelay= 100
+ *   enactment     = After(100)
+ *   track         = WhitelistedCaller
  *   creator       = 0x11 * 20
  *   approvers     = [0x22 * 20, 0x33 * 20]   (strictly ascending)
  *   minApprovers  = 2
@@ -19,7 +20,8 @@ function base(): Proposal {
   return {
     callHash: repeat(0xaa, 32),
     callLen: 42,
-    enactmentDelay: 100,
+    enactment: { kind: DispatchTimeKind.After, block: 100 },
+    track: Track.WhitelistedCaller,
     creator: repeat(0x11, 20),
     approvers: [repeat(0x22, 20), repeat(0x33, 20)],
     minApprovers: 2n,
@@ -38,7 +40,7 @@ describe('proposalKey', () => {
     // (`tests/tests/proposal_key.rs`). The key is now derived as
     // `keccak256(b"Proposal:" || encodeIdentity(base()))`.
     expect(proposalKey(base())).toBe(
-      '0x0f5d2fdbb6bddc361bb51063e80febde2471dc33e65088c7b4bfa457edea872d',
+      '0x2205874084b7d437a369362692570f4591886f255c23a8510d855e683817ac23',
     );
   });
 
@@ -58,7 +60,9 @@ describe('proposalKey', () => {
     expect(proposalKey({ ...base(), callHash: repeat(0xbb, 32) })).not.toBe(key);
     expect(proposalKey({ ...base(), creator: repeat(0x99, 20) })).not.toBe(key);
     expect(proposalKey({ ...base(), callLen: 43 })).not.toBe(key);
-    expect(proposalKey({ ...base(), enactmentDelay: 101 })).not.toBe(key);
+    expect(proposalKey({ ...base(), enactment: { kind: DispatchTimeKind.After, block: 101 } })).not.toBe(key);
+    expect(proposalKey({ ...base(), enactment: { kind: DispatchTimeKind.At, block: 100 } })).not.toBe(key);
+    expect(proposalKey({ ...base(), track: Track.Root })).not.toBe(key);
     expect(proposalKey({ ...base(), minApprovers: 1n })).not.toBe(key);
     expect(proposalKey({ ...base(), approvers: [repeat(0x22, 20), repeat(0x44, 20)] })).not.toBe(key);
     // Shrinking the approver set also requires shrinking minApprovers — the

@@ -11,8 +11,9 @@ ABI so any Ethereum tooling (and the bundled frontend) can talk to it.
 ## How it works
 
 1. **Propose** — anyone registers a proposal: the preimage `callHash` + `callLen` of the
-   runtime call to enact, an enactment delay, an ordered set of `approvers`, and a
-   `minApprovers` threshold. The proposal starts in status **`Review`**.
+   runtime call to enact, an enactment moment (`DispatchTime` — `At` an absolute block or
+   `After` a delay), a governance `track` (`Root` or `WhitelistedCaller`), an ordered set of
+   `approvers`, and a `minApprovers` threshold. The proposal starts in status **`Review`**.
 2. **Approve** — each listed approver signs once. Approvals are tracked on-chain. Only
    possible while the proposal is in `Review`.
 3. **Finalize** — once `approvedBy ≥ minApprovers`, **the creator** finalizes. The contract
@@ -98,12 +99,14 @@ blob is packed.
 
 ```
  off  size  field
-   0   1    version (= 0x01)
+   0   1    version (= 0x02)
    1   32   callHash
   33   4    callLen                (LE u32)
-  37   4    enactmentDelay         (LE u32)
-  41   20   creator
-  61   1    N = approvers.len()
+  37   1    enactment.kind         (0=At, 1=After)
+  38   4    enactment.block        (LE u32)
+  42   1    track                  (0=Root, 1=WhitelistedCaller)
+  43   20   creator
+  63   1    N = approvers.len()
   ..  20·N  approvers
    .   1    minApprovers           (≤ N, fits in u8)
    .   1    M = approvedBy.len()   (≤ N)
@@ -111,11 +114,13 @@ blob is packed.
    .   1    status                 (0=Review, 1=Submitted, 2=Closed)
 ```
 
-Total = **65 + 20·(N + M)** bytes. The leading `version` byte partitions
-keyspace cleanly if the format ever changes incompatibly.
+Total = **67 + 20·(N + M)** bytes. The leading `version` byte partitions
+keyspace cleanly if the format ever changes incompatibly — it was bumped to
+`0x02` when `enactment` (kind + block) and `track` replaced the bare
+`enactmentDelay` u32 of `0x01`.
 
 The Rust and TS encoders are pinned against each other by **golden vectors**
-that decode to the exact same 125-byte buffer (`tests/tests/codec.rs::golden_vector`
+that decode to the exact same 127-byte buffer (`tests/tests/codec.rs::golden_vector`
 and `frontend/src/lib/proposalCodec.test.ts`), so a drift between languages
 shows up immediately in CI rather than as silent on-chain corruption.
 
@@ -123,7 +128,7 @@ shows up immediately in CI rather than as silent on-chain corruption.
 
 The codec exposes `encode_identity(prop)` — a strict prefix of `encode(prop)`
 covering every field that gives a proposal its identity (`callHash`,
-`callLen`, `enactmentDelay`, `creator`, `approvers`, `minApprovers`), but
+`callLen`, `enactment`, `track`, `creator`, `approvers`, `minApprovers`), but
 *not* the mutable bits (`approvedBy`, `status`). `proposal_key` is then:
 
 ```rust
@@ -138,15 +143,15 @@ asserted by a test on both sides.
 ### Capacity: `MAX_APPROVERS = 8`
 
 The worst case for a single proposal is every approver having voted
-(`M = N`). At `N = 8` the blob is `65 + 20·(8+8) = 385` bytes — **31 bytes
-under the cap**. One more approver-or-vote (385 → 405 B) would still fit,
-but two more (385 → 425 B) would overflow:
+(`M = N`). At `N = 8` the blob is `67 + 20·(8+8) = 387` bytes — **29 bytes
+under the cap**. One more approver-or-vote (387 → 407 B) would still fit,
+but two more (387 → 427 B) would overflow:
 
 | N | M | size  | fits |
 |---|---|-------|------|
-| 8 | 8 | 385 B | ✓ (31 B headroom) |
-| 9 | 8 | 405 B | ✓ (11 B headroom) |
-| 9 | 9 | 425 B | ✗ |
+| 8 | 8 | 387 B | ✓ (29 B headroom) |
+| 9 | 8 | 407 B | ✓ (9 B headroom) |
+| 9 | 9 | 427 B | ✗ |
 
 So `MAX_APPROVERS = 8` is the largest `approvers.len()` for which *every*
 approval is guaranteed to round-trip through storage. The constant is a
@@ -182,14 +187,15 @@ just dev                # start the frontend at http://localhost:3000
 
 ## Caveats
 
-- **Pinned to Polkadot Hub.** Pallet indices, the governance track, and the deposit are
-  hardcoded to Asset Hub Polkadot. `propose`/`approve` work on any Hub, but `finalize`
+- **Pinned to Polkadot Hub.** Pallet indices, the governance track origins, and the deposit
+  are hardcoded to Asset Hub Polkadot. `propose`/`approve` work on any Hub, but `finalize`
   only produces a *correct* referendum on Polkadot Hub mainnet — on Paseo it exercises the
-  path without a meaningful submission.
+  path without a meaningful submission. The proposal's `track` (`Root` / `WhitelistedCaller`)
+  selects which hardcoded origin the referendum is submitted under.
 - **Preimage noting is out of scope** for the contract/dApp. `propose` only records the
   call's hash + length; the preimage itself must be noted on Asset Hub (via PAPI /
   polkadot-js) for a referendum to resolve it.
-- **Open placeholders** remain in the XCM module (proposal origin track, fallback weights);
+- **Open placeholders** remain in the XCM module (fallback weights for the inner `Transact`);
   see the inline `TODO`s in `contract/src/xcm.rs`.
 
 ## Stack

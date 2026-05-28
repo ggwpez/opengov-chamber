@@ -18,7 +18,15 @@ export const contractAbi = [
         components: [
           { name: 'callHash', type: 'bytes32' },
           { name: 'callLen', type: 'uint32' },
-          { name: 'enactmentDelay', type: 'uint32' },
+          {
+            name: 'enactment',
+            type: 'tuple',
+            components: [
+              { name: 'kind', type: 'uint8' },
+              { name: 'block', type: 'uint32' },
+            ],
+          },
+          { name: 'track', type: 'uint8' },
           { name: 'creator', type: 'address' },
           { name: 'approvers', type: 'address[]' },
           { name: 'minApprovers', type: 'uint256' },
@@ -40,7 +48,15 @@ export const contractAbi = [
         components: [
           { name: 'callHash', type: 'bytes32' },
           { name: 'callLen', type: 'uint32' },
-          { name: 'enactmentDelay', type: 'uint32' },
+          {
+            name: 'enactment',
+            type: 'tuple',
+            components: [
+              { name: 'kind', type: 'uint8' },
+              { name: 'block', type: 'uint32' },
+            ],
+          },
+          { name: 'track', type: 'uint8' },
           { name: 'creator', type: 'address' },
           { name: 'approvers', type: 'address[]' },
           { name: 'minApprovers', type: 'uint256' },
@@ -64,7 +80,15 @@ export const contractAbi = [
     inputs: [
       { name: 'callHash', type: 'bytes32' },
       { name: 'callLen', type: 'uint32' },
-      { name: 'enactmentDelay', type: 'uint32' },
+      {
+        name: 'enactment',
+        type: 'tuple',
+        components: [
+          { name: 'kind', type: 'uint8' },
+          { name: 'block', type: 'uint32' },
+        ],
+      },
+      { name: 'track', type: 'uint8' },
       { name: 'approvers', type: 'address[]' },
       { name: 'minApprovers', type: 'uint256' },
     ],
@@ -155,11 +179,36 @@ export enum ProposalStatus {
   Closed = 2,
 }
 
+/**
+ * When an enacted referendum's call runs, mirroring Substrate's `DispatchTime`.
+ * ABI-encoded as `uint8`; variant indices match its SCALE encoding.
+ */
+export enum DispatchTimeKind {
+  At = 0,
+  After = 1,
+}
+
+/** Governance track the referendum is submitted to. ABI-encoded as `uint8`. */
+export enum Track {
+  Root = 0,
+  WhitelistedCaller = 1,
+}
+
+/**
+ * Enactment moment: absolute target block for `At`, or number of blocks to wait
+ * for `After`. Mirrors the `DispatchTime` struct in `Contract.sol`.
+ */
+export type DispatchTime = {
+  kind: DispatchTimeKind;
+  block: number;
+};
+
 /** Shape of a single proposal as returned by `allProposals` / `proposal`. */
 export type Proposal = {
   callHash: `0x${string}`;
   callLen: number;
-  enactmentDelay: number;
+  enactment: DispatchTime;
+  track: Track;
   creator: `0x${string}`;
   approvers: readonly `0x${string}`[];
   minApprovers: bigint;

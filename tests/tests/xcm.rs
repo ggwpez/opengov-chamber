@@ -11,8 +11,10 @@ use asset_hub_polkadot_runtime::{OriginCaller, RuntimeCall, governance::pallet_c
 use codec::{Decode, Encode};
 use contract::sol_types::SolCall;
 use contract::xcm::{IXcm, referendum};
+use contract::Contract;
 use contract_tests::Test;
 use frame_support::traits::{Bounded, schedule::DispatchTime};
+use frame_system::RawOrigin;
 use sp_core::H256;
 use xcm::{VersionedXcm, v5::prelude::*};
 
@@ -22,20 +24,41 @@ use xcm::{VersionedXcm, v5::prelude::*};
 const PREIMAGE_LEN: u32 = 42;
 const ENACTMENT_DELAY: u32 = 100;
 
+/// The contract's `DispatchTime::After(ENACTMENT_DELAY)`.
+fn contract_after() -> Contract::DispatchTime {
+    Contract::DispatchTime {
+        kind: Contract::DispatchTimeKind::After,
+        block: ENACTMENT_DELAY,
+    }
+}
+
+/// The `OriginCaller` each `Track` must SCALE-encode to, using the real runtime
+/// types so a renumbered pallet / reordered origin enum fails here.
+fn runtime_origin(track: &Contract::Track) -> OriginCaller {
+    match track {
+        Contract::Track::Root => OriginCaller::system(RawOrigin::Root),
+        Contract::Track::WhitelistedCaller => {
+            OriginCaller::Origins(pallet_custom_origins::Origin::WhitelistedCaller)
+        }
+        other => panic!("unexpected track {other:?}"),
+    }
+}
+
 /// Build the *real* `RuntimeCall::Referenda(submit { .. })` the contract intends
 /// to dispatch, using Asset Hub's own types.
-fn expected_submit_call(call_hash: H256) -> RuntimeCall {
+fn expected_submit_call(
+    call_hash: H256,
+    proposal_origin: OriginCaller,
+    enactment_moment: DispatchTime<u32>,
+) -> RuntimeCall {
     RuntimeCall::Referenda(pallet_referenda::Call::submit {
-        // `OriginCaller::Origins(WhitelistedCaller)` — the whitelisted-call track.
-        proposal_origin: Box::new(OriginCaller::Origins(
-            pallet_custom_origins::Origin::WhitelistedCaller,
-        )),
+        proposal_origin: Box::new(proposal_origin),
         // `Bounded::Lookup { hash, len }` — a preimage lookup by hash.
         proposal: Bounded::Lookup {
             hash: call_hash,
             len: PREIMAGE_LEN,
         },
-        enactment_moment: DispatchTime::After(ENACTMENT_DELAY),
+        enactment_moment,
     })
 }
 
@@ -64,22 +87,48 @@ fn submission_deposit_matches_runtime() {
 fn encode_submit_call_matches_runtime() {
     let call_hash = [0xAA; 32];
 
-    let from_contract = referendum::encode_submit_call(&call_hash, PREIMAGE_LEN, ENACTMENT_DELAY);
-    let from_runtime = expected_submit_call(H256::from(call_hash)).encode();
+    // Cross both tracks with both `DispatchTime` kinds so a wrong variant index
+    // for either origin or enactment moment fails against the real encoding.
+    let cases = [
+        (
+            Contract::Track::WhitelistedCaller,
+            Contract::DispatchTimeKind::After,
+            DispatchTime::After(ENACTMENT_DELAY),
+        ),
+        (
+            Contract::Track::Root,
+            Contract::DispatchTimeKind::At,
+            DispatchTime::At(ENACTMENT_DELAY),
+        ),
+    ];
 
-    assert_eq!(
-        from_contract, from_runtime,
-        "contract's hand-encoded Referenda::submit call diverged from the real \
-         asset-hub-polkadot-runtime encoding (check pallet/variant indices in xcm.rs)"
-    );
+    for (track, kind, moment) in cases {
+        let enactment = Contract::DispatchTime {
+            kind,
+            block: ENACTMENT_DELAY,
+        };
+        let from_contract =
+            referendum::encode_submit_call(&call_hash, PREIMAGE_LEN, &enactment, &track);
+        let from_runtime =
+            expected_submit_call(H256::from(call_hash), runtime_origin(&track), moment).encode();
+
+        assert_eq!(
+            from_contract, from_runtime,
+            "contract's hand-encoded Referenda::submit call diverged from the real \
+             asset-hub-polkadot-runtime encoding for track={track:?} (check pallet/variant \
+             indices in xcm.rs)"
+        );
+    }
 }
 
 #[test]
 fn execute_calldata_wraps_submit_call_in_transact() {
     let call_hash = [0xAA; 32];
+    let track = Contract::Track::WhitelistedCaller;
 
     // Decode the `IXcm.execute(message, weight)` calldata the contract dispatches.
-    let calldata = referendum::build_execute_calldata(&call_hash, PREIMAGE_LEN, ENACTMENT_DELAY);
+    let calldata =
+        referendum::build_execute_calldata(&call_hash, PREIMAGE_LEN, &contract_after(), &track);
     let decoded = IXcm::executeCall::abi_decode_validate(&calldata)
         .expect("build_execute_calldata must produce valid IXcm.execute calldata");
 
@@ -103,7 +152,12 @@ fn execute_calldata_wraps_submit_call_in_transact() {
 
             // The Transact's inner call must be the real Referenda::submit encoding.
             let inner = call.clone().into_encoded();
-            let expected = expected_submit_call(H256::from(call_hash)).encode();
+            let expected = expected_submit_call(
+                H256::from(call_hash),
+                runtime_origin(&track),
+                DispatchTime::After(ENACTMENT_DELAY),
+            )
+            .encode();
             assert_eq!(
                 inner, expected,
                 "Transact's inner call diverged from the real runtime encoding"
@@ -153,7 +207,12 @@ fn hardcoded_weights_cover_runtime_cost_with_bounded_headroom() {
     use pallet_referenda::WeightInfo;
     use xcm_executor::{Config, traits::WeightBounds};
 
-    let calldata = referendum::build_execute_calldata(&[0xAA; 32], PREIMAGE_LEN, ENACTMENT_DELAY);
+    let calldata = referendum::build_execute_calldata(
+        &[0xAA; 32],
+        PREIMAGE_LEN,
+        &contract_after(),
+        &Contract::Track::WhitelistedCaller,
+    );
     let decoded = IXcm::executeCall::abi_decode_validate(&calldata)
         .expect("build_execute_calldata must produce valid IXcm.execute calldata");
 

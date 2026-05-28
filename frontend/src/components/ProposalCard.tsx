@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccount, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { BaseError, formatEther } from 'viem';
-import { contractAbi, ProposalStatus, type Proposal } from '@/lib/abi';
+import { contractAbi, DispatchTimeKind, ProposalStatus, Track, type Proposal } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
@@ -108,8 +108,16 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
           <dd>{proposal.callLen} bytes</dd>
         </div>
         <div>
-          <dt>Enactment delay</dt>
-          <dd>{proposal.enactmentDelay} blocks</dd>
+          <dt>Enactment</dt>
+          <dd>
+            {proposal.enactment.kind === DispatchTimeKind.At
+              ? `at block ${proposal.enactment.block}`
+              : `${proposal.enactment.block} blocks after`}
+          </dd>
+        </div>
+        <div>
+          <dt>Track</dt>
+          <dd>{proposal.track === Track.Root ? 'Root' : 'Whitelisted caller'}</dd>
         </div>
       </dl>
 

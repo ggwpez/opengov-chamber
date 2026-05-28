@@ -1,12 +1,12 @@
 import { bytesToHex, hexToBytes } from 'viem';
-import { ProposalStatus, type Proposal } from './abi';
+import { DispatchTimeKind, ProposalStatus, Track, type Proposal } from './abi';
 
 /**
  * Packed binary codec for a stored {@link Proposal}, mirroring
  * `contract/src/codec.rs` byte-for-byte. Solidity ABI pads every head field
  * to 32 bytes, which collides with pallet-revive's 416-byte storage cap at
  * just N+M = 2 entries; this layout drops the padding so the same proposal
- * fits in `65 + 20·(N+M)` bytes (N+M ≤ 17 within the cap).
+ * fits in `67 + 20·(N+M)` bytes (N+M ≤ 17 within the cap).
  *
  * The Solidity ABI is still what `propose` / `proposal` / `allProposals`
  * speak on the wire — this codec only describes what the contract puts into
@@ -20,9 +20,11 @@ import { ProposalStatus, type Proposal } from './abi';
  *    0   1    version (= VERSION)
  *    1   32   callHash
  *   33   4    callLen
- *   37   4    enactmentDelay
- *   41   20   creator
- *   61   1    N = approvers.length          (≤ 255)
+ *   37   1    enactment.kind               (0=At, 1=After)
+ *   38   4    enactment.block
+ *   42   1    track                        (0=Root, 1=WhitelistedCaller)
+ *   43   20   creator
+ *   63   1    N = approvers.length          (≤ 255)
  *   ..  20·N  approvers
  *    .   1    minApprovers                  (≤ N)
  *    .   1    M = approvedBy.length         (≤ N)
@@ -30,8 +32,9 @@ import { ProposalStatus, type Proposal } from './abi';
  *    .   1    status                        (0/1/2)
  */
 
-export const VERSION = 0x01;
-export const MIN_IDENTITY_LEN = 1 + 32 + 4 + 4 + 20 + 1 + 1;
+export const VERSION = 0x02;
+// version + callHash + callLen + enactment(kind+block) + track + creator + N + min.
+export const MIN_IDENTITY_LEN = 1 + 32 + 4 + (1 + 4) + 1 + 20 + 1 + 1;
 export const MIN_ENCODED_LEN = MIN_IDENTITY_LEN + 1 + 1;
 export const MAX_ENCODED_LEN = 416;
 /**
@@ -111,7 +114,9 @@ function writeIdentity(
   out[off++] = VERSION;
   out.set(hexToBytes(p.callHash), off); off += 32;
   writeU32LE(out, off, p.callLen); off += 4;
-  writeU32LE(out, off, p.enactmentDelay); off += 4;
+  out[off++] = encodeDispatchKind(p.enactment.kind);
+  writeU32LE(out, off, p.enactment.block); off += 4;
+  out[off++] = encodeTrack(p.track);
   out.set(hexToBytes(p.creator), off); off += 20;
 
   out[off++] = n;
@@ -132,7 +137,8 @@ export function decodeProposal(bytes: Uint8Array): Proposal {
   }
   const callHash = c.readHex(32);
   const callLen = c.readU32LE();
-  const enactmentDelay = c.readU32LE();
+  const enactment = { kind: decodeDispatchKind(c.readU8()), block: c.readU32LE() };
+  const track = decodeTrack(c.readU8());
   const creator = c.readHex(20);
 
   const n = c.readU8();
@@ -153,7 +159,8 @@ export function decodeProposal(bytes: Uint8Array): Proposal {
   return {
     callHash,
     callLen,
-    enactmentDelay,
+    enactment,
+    track,
     creator,
     approvers,
     minApprovers: BigInt(min),
@@ -177,6 +184,38 @@ function decodeStatus(b: number): ProposalStatus {
     case 1: return ProposalStatus.Submitted;
     case 2: return ProposalStatus.Closed;
     default: throw new ProposalCodecError('BadStatus', `unknown status ${b}`);
+  }
+}
+
+function encodeDispatchKind(k: DispatchTimeKind): number {
+  switch (k) {
+    case DispatchTimeKind.At: return 0;
+    case DispatchTimeKind.After: return 1;
+    default: throw new ProposalCodecError('BadDispatchKind', `unknown kind ${k}`);
+  }
+}
+
+function decodeDispatchKind(b: number): DispatchTimeKind {
+  switch (b) {
+    case 0: return DispatchTimeKind.At;
+    case 1: return DispatchTimeKind.After;
+    default: throw new ProposalCodecError('BadDispatchKind', `unknown kind ${b}`);
+  }
+}
+
+function encodeTrack(t: Track): number {
+  switch (t) {
+    case Track.Root: return 0;
+    case Track.WhitelistedCaller: return 1;
+    default: throw new ProposalCodecError('BadTrack', `unknown track ${t}`);
+  }
+}
+
+function decodeTrack(b: number): Track {
+  switch (b) {
+    case 0: return Track.Root;
+    case 1: return Track.WhitelistedCaller;
+    default: throw new ProposalCodecError('BadTrack', `unknown track ${b}`);
   }
 }
 

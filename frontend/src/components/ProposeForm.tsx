@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAccount, useSwitchChain, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { BaseError } from 'viem';
-import { contractAbi } from '@/lib/abi';
+import { contractAbi, DispatchTimeKind, Track } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { paseoHub } from '@/lib/chain';
 import { useActiveAccount } from '@/lib/activeAccount';
@@ -26,7 +26,9 @@ export function ProposeForm() {
   const [callHash, setCallHash] = useState('');
   const [callLen, setCallLen] = useState('');
   const [callBytes, setCallBytes] = useState('');
-  const [enactmentDelay, setEnactmentDelay] = useState('100');
+  const [enactmentKind, setEnactmentKind] = useState<DispatchTimeKind>(DispatchTimeKind.After);
+  const [enactmentBlock, setEnactmentBlock] = useState('100');
+  const [track, setTrack] = useState<Track>(Track.WhitelistedCaller);
   const [approversRaw, setApproversRaw] = useState('');
   const [minApprovers, setMinApprovers] = useState('1');
 
@@ -58,7 +60,7 @@ export function ProposeForm() {
     !!address && approvers.some((a) => a.toLowerCase() === address.toLowerCase());
 
   const minN = Number(minApprovers);
-  const delayN = Number(enactmentDelay);
+  const blockN = Number(enactmentBlock);
 
   const problems: string[] = [];
   if (mode === 'hash' && callHash && !isHash32(effHash)) problems.push('Call hash must be 32 bytes (0x + 64 hex).');
@@ -68,7 +70,13 @@ export function ProposeForm() {
   if (creatorIsApprover) problems.push('Your own address cannot be an approver.');
   if (!Number.isInteger(minN) || minN < 1) problems.push('Min approvers must be ≥ 1.');
   if (approvers.length > 0 && minN > approvers.length) problems.push('Min approvers exceeds approver count.');
-  if (!Number.isInteger(delayN) || delayN < 0) problems.push('Enactment delay must be ≥ 0.');
+  if (!Number.isInteger(blockN) || blockN < 0) {
+    problems.push(
+      enactmentKind === DispatchTimeKind.At
+        ? 'Enactment block must be ≥ 0.'
+        : 'Enactment delay must be ≥ 0.',
+    );
+  }
 
   const ready =
     isConnected && !wrongChain && isHash32(effHash) && effLen > 0 && approvers.length > 0 && !creatorIsApprover && problems.length === 0;
@@ -87,7 +95,14 @@ export function ProposeForm() {
         address: CONTRACT_ADDRESS,
         abi: contractAbi,
         functionName: 'propose',
-        args: [effHash as `0x${string}`, effLen, delayN, approvers, BigInt(minN)],
+        args: [
+          effHash as `0x${string}`,
+          effLen,
+          { kind: enactmentKind, block: blockN },
+          track,
+          approvers,
+          BigInt(minN),
+        ],
       },
       {
         onSuccess: () => queryClient.invalidateQueries(),
@@ -147,23 +162,46 @@ export function ProposeForm() {
 
       <div className="grid-2">
         <div className="field">
-          <label>Enactment delay (blocks)</label>
-          <input
-            className="input"
-            inputMode="numeric"
-            value={enactmentDelay}
-            onChange={(e) => setEnactmentDelay(e.target.value.replace(/[^\d]/g, ''))}
-          />
+          <label>Enactment</label>
+          <div className="row">
+            <select
+              className="input"
+              value={enactmentKind}
+              onChange={(e) => setEnactmentKind(Number(e.target.value) as DispatchTimeKind)}
+            >
+              <option value={DispatchTimeKind.After}>After (delay)</option>
+              <option value={DispatchTimeKind.At}>At (block)</option>
+            </select>
+            <input
+              className="input"
+              inputMode="numeric"
+              placeholder={enactmentKind === DispatchTimeKind.At ? 'block number' : 'blocks to wait'}
+              value={enactmentBlock}
+              onChange={(e) => setEnactmentBlock(e.target.value.replace(/[^\d]/g, ''))}
+            />
+          </div>
         </div>
         <div className="field">
-          <label>Min approvers</label>
-          <input
+          <label>Track</label>
+          <select
             className="input"
-            inputMode="numeric"
-            value={minApprovers}
-            onChange={(e) => setMinApprovers(e.target.value.replace(/[^\d]/g, ''))}
-          />
+            value={track}
+            onChange={(e) => setTrack(Number(e.target.value) as Track)}
+          >
+            <option value={Track.WhitelistedCaller}>Whitelisted caller</option>
+            <option value={Track.Root}>Root</option>
+          </select>
         </div>
+      </div>
+
+      <div className="field">
+        <label>Min approvers</label>
+        <input
+          className="input"
+          inputMode="numeric"
+          value={minApprovers}
+          onChange={(e) => setMinApprovers(e.target.value.replace(/[^\d]/g, ''))}
+        />
       </div>
 
       <div className="field">

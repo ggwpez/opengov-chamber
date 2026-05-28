@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ProposalStatus, type Proposal } from './abi';
+import { DispatchTimeKind, ProposalStatus, Track, type Proposal } from './abi';
 import {
   encodeProposal,
   encodeIdentity,
@@ -17,16 +17,18 @@ const repeat = (byte: number, len: number): `0x${string}` =>
 
 /**
  * Identical to the `fixture()` defined in `../../../tests/tests/codec.rs`:
- *   callHash = 0xAA·32, callLen = 42, enactmentDelay = 100,
- *   creator = 0x11·20, approvers = [0x22·20, 0x33·20],
- *   minApprovers = 2, approvedBy = [0x22·20], status = Review.
+ *   callHash = 0xAA·32, callLen = 42, enactment = After(100),
+ *   track = WhitelistedCaller, creator = 0x11·20,
+ *   approvers = [0x22·20, 0x33·20], minApprovers = 2,
+ *   approvedBy = [0x22·20], status = Review.
  * Keep both in lockstep.
  */
 function fixture(): Proposal {
   return {
     callHash: repeat(0xaa, 32),
     callLen: 42,
-    enactmentDelay: 100,
+    enactment: { kind: DispatchTimeKind.After, block: 100 },
+    track: Track.WhitelistedCaller,
     creator: repeat(0x11, 20),
     approvers: [repeat(0x22, 20), repeat(0x33, 20)],
     minApprovers: 2n,
@@ -38,13 +40,17 @@ function fixture(): Proposal {
 /** Byte-for-byte match with `golden_vector` in `tests/tests/codec.rs`. */
 const GOLDEN_HEX =
   // version
-  '01' +
+  '02' +
   // callHash
   'aa'.repeat(32) +
   // callLen = 42 LE
   '2a000000' +
-  // enactmentDelay = 100 LE
+  // enactment.kind = After (1)
+  '01' +
+  // enactment.block = 100 LE
   '64000000' +
+  // track = WhitelistedCaller (1)
+  '01' +
   // creator
   '11'.repeat(20) +
   // approvers.len = 2
@@ -77,6 +83,14 @@ describe('proposalCodec', () => {
     expect(encodeProposal(fixture())).toEqual(GOLDEN_BYTES);
   });
 
+  // The read-path parity guard: decode the exact bytes the Rust contract emits
+  // (the cross-language golden vector), not just bytes we encoded ourselves. A
+  // decode bug that happened to mirror an encode bug would slip past the
+  // round-trip test but fails here.
+  it('decodes the on-chain golden bytes back to the canonical proposal', () => {
+    expect(decodeProposal(GOLDEN_BYTES)).toEqual(fixture());
+  });
+
   it('round-trips the canonical proposal', () => {
     const bytes = encodeProposal(fixture());
     expect(decodeProposal(bytes)).toEqual(fixture());
@@ -86,7 +100,8 @@ describe('proposalCodec', () => {
     const prop: Proposal = {
       callHash: repeat(0, 32),
       callLen: 0,
-      enactmentDelay: 0,
+      enactment: { kind: DispatchTimeKind.At, block: 0 },
+      track: Track.Root,
       creator: repeat(0, 20),
       approvers: [],
       minApprovers: 0n,
@@ -110,7 +125,8 @@ describe('proposalCodec', () => {
     const prop: Proposal = {
       callHash: repeat(0, 32),
       callLen: 0,
-      enactmentDelay: 0,
+      enactment: { kind: DispatchTimeKind.At, block: 0 },
+      track: Track.Root,
       creator: repeat(0xff, 20),
       approvers,
       minApprovers: 17n,
@@ -119,7 +135,7 @@ describe('proposalCodec', () => {
     };
     const bytes = encodeProposal(prop);
     expect(bytes.length).toBeLessThanOrEqual(MAX_ENCODED_LEN);
-    expect(bytes.length).toBe(65 + 20 * 17);
+    expect(bytes.length).toBe(67 + 20 * 17);
   });
 
   it('refuses an 18-approver proposal that would exceed the storage cap', () => {
@@ -127,7 +143,8 @@ describe('proposalCodec', () => {
     const prop: Proposal = {
       callHash: repeat(0, 32),
       callLen: 0,
-      enactmentDelay: 0,
+      enactment: { kind: DispatchTimeKind.At, block: 0 },
+      track: Track.Root,
       creator: repeat(0xff, 20),
       approvers,
       minApprovers: 1n,
@@ -172,23 +189,38 @@ describe('proposalCodec', () => {
     expect(() => decodeProposal(bytes)).toThrow(ProposalCodecError);
   });
 
+  it('decode rejects an out-of-range enactment kind', () => {
+    const bytes = encodeProposal(fixture());
+    // enactment.kind sits after version + callHash + callLen.
+    bytes[1 + 32 + 4] = 7;
+    expect(() => decodeProposal(bytes)).toThrow(ProposalCodecError);
+  });
+
+  it('decode rejects an out-of-range track', () => {
+    const bytes = encodeProposal(fixture());
+    // track sits after version + callHash + callLen + kind(1) + block(4).
+    bytes[1 + 32 + 4 + 1 + 4] = 7;
+    expect(() => decodeProposal(bytes)).toThrow(ProposalCodecError);
+  });
+
   it('encodes the documented constants', () => {
-    expect(VERSION).toBe(0x01);
-    expect(MIN_IDENTITY_LEN).toBe(63);
-    expect(MIN_ENCODED_LEN).toBe(65);
+    expect(VERSION).toBe(0x02);
+    expect(MIN_IDENTITY_LEN).toBe(65);
+    expect(MIN_ENCODED_LEN).toBe(67);
     expect(MAX_ENCODED_LEN).toBe(416);
     expect(MAX_APPROVERS).toBe(8);
   });
 
   // Worst case for the per-proposal lifecycle: every approver has also voted.
-  // At `MAX_APPROVERS = 8` the blob is `65 + 20·(8+8) = 385` bytes — under the
-  // 416 cap with 31 bytes of headroom. Adding one more would tip it over.
+  // At `MAX_APPROVERS = 8` the blob is `67 + 20·(8+8) = 387` bytes — under the
+  // 416 cap with 29 bytes of headroom. Adding one more would tip it over.
   it('fits MAX_APPROVERS with full approval inside the storage cap', () => {
     const approvers = Array.from({ length: MAX_APPROVERS }, (_, i) => repeat(i + 1, 20));
     const prop: Proposal = {
       callHash: repeat(0xaa, 32),
       callLen: 0xffffffff,
-      enactmentDelay: 0xffffffff,
+      enactment: { kind: DispatchTimeKind.After, block: 0xffffffff },
+      track: Track.WhitelistedCaller,
       creator: repeat(0xff, 20),
       approvers,
       minApprovers: BigInt(MAX_APPROVERS),
@@ -207,7 +239,8 @@ describe('proposalCodec', () => {
     const prop: Proposal = {
       callHash: repeat(0, 32),
       callLen: 0,
-      enactmentDelay: 0,
+      enactment: { kind: DispatchTimeKind.At, block: 0 },
+      track: Track.Root,
       creator: repeat(0xff, 20),
       approvers,
       minApprovers: BigInt(n),

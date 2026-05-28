@@ -42,7 +42,8 @@ pub extern "C" fn call() {
             let prop = Contract::Proposal {
                 callHash: call.callHash,
                 callLen: call.callLen,
-                enactmentDelay: call.enactmentDelay,
+                enactment: call.enactment,
+                track: call.track,
                 creator: get_caller(),
                 approvers: call.approvers,
                 minApprovers: call.minApprovers,
@@ -128,7 +129,8 @@ pub extern "C" fn call() {
             let input = xcm::referendum::build_execute_calldata(
                 &proposal.callHash.0,
                 proposal.callLen,
-                proposal.enactmentDelay,
+                &proposal.enactment,
+                &proposal.track,
             );
             let dispatched = api::call(
                 CallFlags::empty(),

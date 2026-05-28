@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ProposeForm } from './ProposeForm';
+import { DispatchTimeKind, Track } from '@/lib/abi';
 import { paseoHub } from '@/lib/chain';
 
 const useAccount = vi.fn();
@@ -108,7 +109,14 @@ describe('ProposeForm — submission', () => {
       functionName: 'propose',
       chainId: paseoHub.id,
       account: CREATOR,
-      args: [HASH32, 42, 100, [APPROVER], 1n],
+      args: [
+        HASH32,
+        42,
+        { kind: DispatchTimeKind.After, block: 100 },
+        Track.WhitelistedCaller,
+        [APPROVER],
+        1n,
+      ],
     });
   });
 });
