@@ -9,9 +9,9 @@
 
 use asset_hub_polkadot_runtime::{OriginCaller, RuntimeCall, governance::pallet_custom_origins};
 use codec::{Decode, Encode};
+use contract::Contract;
 use contract::sol_types::SolCall;
 use contract::xcm::{IXcm, referendum};
-use contract::Contract;
 use contract_tests::Test;
 use frame_support::traits::{Bounded, schedule::DispatchTime};
 use frame_system::RawOrigin;

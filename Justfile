@@ -99,9 +99,9 @@ frontend-env addr rpc=paseo_rpc:
 frontend-install:
     cd frontend && npm install
 
-# Start the frontend dev server (http://localhost:3000).
+# Start the frontend dev server (http://localhost:8080).
 dev:
-    cd frontend && npm run dev
+    cd frontend && npm run dev -- -p 8080
 
 # Run the frontend Vitest suite (unit + component tests). No wallet/node needed.
 frontend-test:

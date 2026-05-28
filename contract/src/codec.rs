@@ -132,7 +132,12 @@ fn validate_identity(prop: &Contract::Proposal) -> Result<Identity, CodecError> 
     }
     let kind = encode_dispatch_kind(&prop.enactment.kind)?;
     let track = encode_track(&prop.track)?;
-    Ok(Identity { n, min, kind, track })
+    Ok(Identity {
+        n,
+        min,
+        kind,
+        track,
+    })
 }
 
 /// Append the identity prefix to `out`. Caller must have validated via

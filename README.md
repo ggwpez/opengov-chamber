@@ -17,9 +17,12 @@ ABI so any Ethereum tooling (and the bundled frontend) can talk to it.
 2. **Approve** — each listed approver signs once. Approvals are tracked on-chain. Only
    possible while the proposal is in `Review`.
 3. **Finalize** — once `approvedBy ≥ minApprovers`, **the creator** finalizes. The contract
-   `api::call`s the **XCM precompile** with a local `Transact` wrapping
-   `Referenda::submit`, dispatched under the contract's own signed origin, and the proposal
-   moves to status **`Submitted`**.
+   `api::call`s the **XCM precompile** with a local `Transact` wrapping `Referenda::submit`,
+   dispatched under the contract's own sovereign account. The proposal's stored fields drive
+   the submitted referendum: `callHash` + `callLen` become the `Bounded::Lookup` preimage
+   reference, `enactment` becomes the `DispatchTime` enactment moment (`At`/`After`), and
+   `track` selects the `proposal_origin` (`Root` → `system(Root)`, `WhitelistedCaller` →
+   `Origins(WhitelistedCaller)`). The proposal then moves to status **`Submitted`**.
 4. **Close** — alternatively, **the creator** can abandon a proposal before finalizing,
    moving it to status **`Closed`**. Not possible after finalizing.
 

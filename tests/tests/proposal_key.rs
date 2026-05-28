@@ -92,7 +92,11 @@ fn proposal_key_changes_when_any_field_changes() {
 
     let mut p = base();
     p.track = Contract::Track::Root;
-    assert_ne!(proposal_key(&p).unwrap(), base_key, "key must change with track");
+    assert_ne!(
+        proposal_key(&p).unwrap(),
+        base_key,
+        "key must change with track"
+    );
 }
 
 #[test]

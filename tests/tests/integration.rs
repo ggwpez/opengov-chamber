@@ -40,20 +40,32 @@ fn blob_size_is_sane() {
     eprintln!("blob size is sane: {}", size);
 }
 
-/// Fund ALICE, deploy the contract, and submit one proposal.
+/// Fund ALICE, deploy the contract, and submit one proposal with the default
+/// `After(100)` enactment on the `WhitelistedCaller` track.
 ///
 /// Returns the contract address and the proposal that was created.
 fn setup_with_proposal() -> (H160, Contract::Proposal) {
+    setup_with_proposal_cfg(
+        Contract::DispatchTime {
+            kind: Contract::DispatchTimeKind::After,
+            block: 100,
+        },
+        Contract::Track::WhitelistedCaller,
+    )
+}
+
+/// Like [`setup_with_proposal`] but with a caller-chosen `enactment` and `track`,
+/// so tests can exercise each `DispatchTime` / `Track` config end-to-end.
+fn setup_with_proposal_cfg(
+    enactment: Contract::DispatchTime,
+    track: Contract::Track,
+) -> (H160, Contract::Proposal) {
     fund(&ALICE, ENDOWMENT);
-    let enactment = Contract::DispatchTime {
-        kind: Contract::DispatchTimeKind::After,
-        block: 100,
-    };
     let expected_proposal = Contract::Proposal {
         callHash: B256::repeat_byte(0xAA),
         callLen: 42,
         enactment: enactment.clone(),
-        track: Contract::Track::WhitelistedCaller,
+        track: track.clone(),
         creator: Address::from(ALICE_ADDR.0),
         approvers: vec![Address::from(BOB_ADDR.0)],
         minApprovers: contract::U256::from(1u64),
@@ -75,7 +87,7 @@ fn setup_with_proposal() -> (H160, Contract::Proposal) {
                 callHash: B256::repeat_byte(0xAA),
                 callLen: 42,
                 enactment,
-                track: Contract::Track::WhitelistedCaller,
+                track,
                 approvers: vec![Address::from(BOB_ADDR.0)],
                 minApprovers: contract::U256::from(1u64),
             }
@@ -485,6 +497,78 @@ fn finalize_submits_referendum() {
                 expected_proposal.callLen,
             )),
             "contract must not have noted the preimage, only referenced it",
+        );
+    });
+}
+
+/// The chosen `track` and `enactment` must actually shape the *on-chain*
+/// referendum, not merely round-trip through the codec. This submits with the
+/// non-default `Root` track and an `At` enactment, then reads the referendum
+/// back out of `pallet_referenda` and asserts both fields landed — exercising
+/// the whole pipeline: `propose` → storage → `finalize`'s XCM `submit`.
+#[test]
+fn finalize_honors_track_and_enactment() {
+    use asset_hub_polkadot_runtime::OriginCaller;
+    use frame_support::traits::schedule::DispatchTime;
+    use frame_system::RawOrigin;
+
+    const AT_BLOCK: u32 = 1234;
+
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, expected_proposal) = setup_with_proposal_cfg(
+            Contract::DispatchTime {
+                kind: Contract::DispatchTimeKind::At,
+                block: AT_BLOCK,
+            },
+            Contract::Track::Root,
+        );
+        let key = proposal_key(&expected_proposal).unwrap();
+
+        // BOB approves to meet `minApprovers: 1`.
+        let _ = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(
+                Contract::approveCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(
+                Contract::finalizeCall {
+                    proposalHash: key.into(),
+                }
+                .abi_encode(),
+            )
+            .native_value(SUBMISSION_DEPOSIT)
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        // The referendum exists — which already proves the `Root` origin mapped to
+        // a real track (a bad `proposal_origin` would make `submit` fail, and the
+        // XCM `Transact` would swallow it, leaving nothing here).
+        let info = pallet_referenda::ReferendumInfoFor::<Test>::get(0)
+            .expect("referendum 0 should have been submitted");
+        let status = match info {
+            pallet_referenda::ReferendumInfo::Ongoing(status) => status,
+            other => panic!("expected an ongoing referendum, got {:?}", other),
+        };
+
+        // `Track::Root` must submit under the `system(Root)` proposal origin...
+        assert_eq!(
+            status.origin,
+            OriginCaller::system(RawOrigin::Root),
+            "submitted referendum must carry the Root proposal_origin",
+        );
+        // ...and `DispatchTimeKind::At` must carry through as `DispatchTime::At(block)`.
+        assert_eq!(
+            status.enactment,
+            DispatchTime::At(AT_BLOCK),
+            "submitted referendum must carry the At enactment moment",
         );
     });
 }

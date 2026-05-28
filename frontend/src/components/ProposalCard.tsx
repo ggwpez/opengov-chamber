@@ -112,7 +112,7 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
           <dd>
             {proposal.enactment.kind === DispatchTimeKind.At
               ? `at block ${proposal.enactment.block}`
-              : `${proposal.enactment.block} blocks after`}
+              : `after ${proposal.enactment.block} blocks`}
           </dd>
         </div>
         <div>

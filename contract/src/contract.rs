@@ -125,7 +125,9 @@ pub extern "C" fn call() {
 
             // Dispatch `Referenda::submit` for `proposal.callHash` by executing a
             // local XCM `Transact` through Asset Hub's XCM precompile. The XCM runs
-            // under this contract's signed origin.
+            // under this contract's sovereign account; the proposal's `enactment`
+            // (DispatchTime) and `track` (referendum origin) are threaded into the
+            // submitted referendum.
             let input = xcm::referendum::build_execute_calldata(
                 &proposal.callHash.0,
                 proposal.callLen,
