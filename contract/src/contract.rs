@@ -8,14 +8,17 @@ use alloy_core::{
     sol_types::{EventTopic, SolCall, SolError, SolEvent, SolValue, sol_data},
 };
 use contract::{
-    Contract, ProposalError, expect_review, mark_closed, mark_submitted, proposal_key, xcm,
+    Contract, ProposalError, codec, expect_review, mark_closed, mark_submitted, proposal_key, xcm,
 };
 use pallet_revive_uapi::{CallFlags, HostFn, HostFnImpl as api, ReturnFlags, StorageFlags};
 
 extern crate alloc;
 use alloc::{vec, vec::Vec};
 
-const MAX_PROPOSAL_BYTES: usize = 1024;
+/// Upper bound on any single storage value, matching pallet-revive's
+/// `STORAGE_BYTES` limit. The packed [`codec`] format caps proposals at exactly
+/// this; the all-keys list also has to fit within it (≤ 12 keys at present).
+const MAX_STORAGE_BYTES: usize = codec::MAX_ENCODED_LEN;
 const ALL_PROPOSAL_KEYS_KEY: &[u8] = b"all_proposal_keys";
 
 /// This is the constructor which is called once per contract.
@@ -184,17 +187,20 @@ pub extern "C" fn call() {
 }
 
 fn get_proposal(key: &[u8; 32]) -> Option<Contract::Proposal> {
-    let mut buf = vec![0u8; MAX_PROPOSAL_BYTES]; // upper bound from max approvers
-    let mut out = buf.as_mut_slice();
+    let mut buf = [0u8; MAX_STORAGE_BYTES];
+    let mut out: &mut [u8] = &mut buf;
 
     api::get_storage(StorageFlags::empty(), key, &mut out).ok()?;
-    Contract::Proposal::abi_decode_validate(&out).ok()
+    codec::decode(out).ok()
 }
 
 fn set_proposal(prop: &Contract::Proposal) {
     let key = proposal_key(prop).unwrap();
 
-    let out = Contract::Proposal::abi_encode(prop);
+    // Unwrap rather than `REVERT`: the caller has already passed the higher-level
+    // invariants (`proposal_key` succeeded, the proposal fits the array bounds),
+    // so a codec failure here is a contract bug, not bad input.
+    let out = codec::encode(prop).unwrap();
     api::set_storage(StorageFlags::empty(), &key, &out);
 }
 
@@ -207,8 +213,8 @@ fn set_all_proposal_keys(keys: &Vec<[u8; 32]>) {
 }
 
 fn get_all_proposal_keys() -> Vec<[u8; 32]> {
-    let mut buf = vec![0u8; MAX_PROPOSAL_BYTES]; // upper bound from max approvers
-    let mut out = buf.as_mut_slice();
+    let mut buf = [0u8; MAX_STORAGE_BYTES];
+    let mut out: &mut [u8] = &mut buf;
 
     if api::get_storage(StorageFlags::empty(), ALL_PROPOSAL_KEYS_KEY, &mut out).is_err() {
         return Vec::new();

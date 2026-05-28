@@ -78,6 +78,84 @@ The on-chain change above is reflected in the frontend (`frontend/`):
    (`Submitted`/`Closed`) ones, which sit under a "Submitted & cancelled" heading and are
    visually de-emphasized so they don't clutter the active queue.
 
+## Storage encoding
+
+A single storage value in `pallet-revive` is capped at **416 bytes**
+(`pallet_revive::limits::STORAGE_BYTES`). The Solidity ABI pads every head
+field to a full 32-byte EVM word regardless of declared width, so a
+`Proposal` round-trips through alloy at `352 + 32·(N + M)` bytes — colliding
+with the cap at just **N + M = 2** entries (where `N = approvers`,
+`M = approvedBy`).
+
+To buy room, the contract carries a hand-rolled packed codec
+(`contract/src/codec.rs`, mirrored in `frontend/src/lib/proposalCodec.ts`)
+for the bytes that actually hit `api::set_storage`. The Solidity ABI is still
+the wire format on every contract entrypoint — `propose` / `proposal` /
+`allProposals` / events — so wagmi/viem decode normally; only the on-storage
+blob is packed.
+
+### Wire format
+
+```
+ off  size  field
+   0   1    version (= 0x01)
+   1   32   callHash
+  33   4    callLen                (LE u32)
+  37   4    enactmentDelay         (LE u32)
+  41   20   creator
+  61   1    N = approvers.len()
+  ..  20·N  approvers
+   .   1    minApprovers           (≤ N, fits in u8)
+   .   1    M = approvedBy.len()   (≤ N)
+   .  20·M  approvedBy
+   .   1    status                 (0=Review, 1=Submitted, 2=Closed)
+```
+
+Total = **65 + 20·(N + M)** bytes. The leading `version` byte partitions
+keyspace cleanly if the format ever changes incompatibly.
+
+The Rust and TS encoders are pinned against each other by **golden vectors**
+that decode to the exact same 125-byte buffer (`tests/tests/codec.rs::golden_vector`
+and `frontend/src/lib/proposalCodec.test.ts`), so a drift between languages
+shows up immediately in CI rather than as silent on-chain corruption.
+
+### `proposalKey` and the identity prefix
+
+The codec exposes `encode_identity(prop)` — a strict prefix of `encode(prop)`
+covering every field that gives a proposal its identity (`callHash`,
+`callLen`, `enactmentDelay`, `creator`, `approvers`, `minApprovers`), but
+*not* the mutable bits (`approvedBy`, `status`). `proposal_key` is then:
+
+```rust
+keccak256(b"Proposal:" || codec::encode_identity(prop))
+```
+
+Sharing the encoder with storage means there's a single byte-level encoding
+to keep in sync across languages; the frontend's `proposalKey` mirror is a
+~5-line wrapper around `encodeIdentity`. The strict-prefix property is
+asserted by a test on both sides.
+
+### Capacity: `MAX_APPROVERS = 8`
+
+The worst case for a single proposal is every approver having voted
+(`M = N`). At `N = 8` the blob is `65 + 20·(8+8) = 385` bytes — **31 bytes
+under the cap**. One more approver-or-vote (385 → 405 B) would still fit,
+but two more (385 → 425 B) would overflow:
+
+| N | M | size  | fits |
+|---|---|-------|------|
+| 8 | 8 | 385 B | ✓ (31 B headroom) |
+| 9 | 8 | 405 B | ✓ (11 B headroom) |
+| 9 | 9 | 425 B | ✗ |
+
+So `MAX_APPROVERS = 8` is the largest `approvers.len()` for which *every*
+approval is guaranteed to round-trip through storage. The constant is a
+hardcoded literal in both `codec.rs` and `proposalCodec.ts`; the
+`max_approvers_with_full_approval_fits_storage_cap` test fails loudly if a
+future layout change ever makes 8 no longer fit. To grow past 8 you'd have
+to shave bytes off the layout (drop the version byte, fold the status byte
+into spare bits, or move `approvedBy` to a separate storage key).
+
 ## Layout
 
 | Path | What |

@@ -34,8 +34,11 @@ describe('proposalKey', () => {
   // ever drifts from `contract/src/lib.rs::proposal_key`, approve/finalize would
   // silently target a non-existent key and revert — this test fails first.
   it('matches the on-chain golden hash for the canonical proposal', () => {
+    // Asserts the same value as Rust's `proposal_key_golden_hash`
+    // (`tests/tests/proposal_key.rs`). The key is now derived as
+    // `keccak256(b"Proposal:" || encodeIdentity(base()))`.
     expect(proposalKey(base())).toBe(
-      '0x1d2e20208aa56ed9dfb796543565889480c3739691f7b915c7db1a4c8764da41',
+      '0x0f5d2fdbb6bddc361bb51063e80febde2471dc33e65088c7b4bfa457edea872d',
     );
   });
 
@@ -58,6 +61,8 @@ describe('proposalKey', () => {
     expect(proposalKey({ ...base(), enactmentDelay: 101 })).not.toBe(key);
     expect(proposalKey({ ...base(), minApprovers: 1n })).not.toBe(key);
     expect(proposalKey({ ...base(), approvers: [repeat(0x22, 20), repeat(0x44, 20)] })).not.toBe(key);
-    expect(proposalKey({ ...base(), approvers: [repeat(0x22, 20)] })).not.toBe(key);
+    // Shrinking the approver set also requires shrinking minApprovers — the
+    // codec rejects min > N (same guard as the contract's `proposal_key`).
+    expect(proposalKey({ ...base(), approvers: [repeat(0x22, 20)], minApprovers: 1n })).not.toBe(key);
   });
 });
