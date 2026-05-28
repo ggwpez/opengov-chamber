@@ -11,6 +11,24 @@
 :3000 {
 	root * out
 	encode gzip zstd
+
+	# Mirror of the production JSON-RPC proxy (see deploy/chamber.caddy) so a
+	# build pointed at http://localhost:3000/rpc/ works offline of the server.
+	handle_path /rpc/* {
+		header {
+			Access-Control-Allow-Origin "*"
+			Access-Control-Allow-Methods "POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type"
+			defer
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+
+		reverse_proxy https://eth-rpc.polkadot.io {
+			header_up Host eth-rpc.polkadot.io
+		}
+	}
+
 	file_server
 
 	# Next's hashed assets under _next/static are content-addressed and never

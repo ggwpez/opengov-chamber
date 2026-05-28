@@ -5,6 +5,31 @@
 chamber.tasty.limo {
 	root * /srv/chamber/out
 	encode zstd gzip
+
+	# JSON-RPC proxy. The static bundle points NEXT_PUBLIC_RPC_URL at this
+	# same-origin path instead of eth-rpc.polkadot.io directly. Two wins:
+	#   1. Same-origin → no browser CORS preflight (the public endpoint sends
+	#      no Access-Control-Allow-Origin, which otherwise blocks every call).
+	#   2. Caddy keeps keep-alive connections to the upstream, so visitors no
+	#      longer each open fresh connections and trip its "too many
+	#      connections" 429 rate limit.
+	# The CORS headers also let cross-origin callers (e.g. a local dev build)
+	# reuse this proxy. handle_path strips the /rpc prefix before forwarding.
+	handle_path /rpc/* {
+		header {
+			Access-Control-Allow-Origin "*"
+			Access-Control-Allow-Methods "POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type"
+			defer
+		}
+		@preflight method OPTIONS
+		respond @preflight 204
+
+		reverse_proxy https://eth-rpc.polkadot.io {
+			header_up Host eth-rpc.polkadot.io
+		}
+	}
+
 	file_server
 
 	# Next's hashed assets are content-addressed and never change — cache them hard.
