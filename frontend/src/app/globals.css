@@ -329,6 +329,14 @@ a:hover {
   border-color: color-mix(in srgb, var(--mint) 45%, transparent);
   background: color-mix(in srgb, var(--mint) 10%, transparent);
 }
+/* clickable approver chip — keep the chip's own color, just allow the link */
+a.chip {
+  text-decoration: none;
+  cursor: pointer;
+}
+a.chip:hover {
+  text-decoration: underline;
+}
 
 /* ----------------------------------------------------------- status tag */
 
@@ -563,6 +571,15 @@ a:hover {
 }
 .addr-link:hover {
   color: var(--magenta);
+  text-decoration: underline;
+}
+/* clickable address, but no color highlight — inherits surrounding text color */
+.addr-plain {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.addr-plain:hover {
   text-decoration: underline;
 }
 

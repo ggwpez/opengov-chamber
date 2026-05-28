@@ -8,7 +8,7 @@ import { contractAbi, DispatchTimeKind, ProposalStatus, Track, type Proposal } f
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
-import { explorerPreimageUrl } from '@/lib/chain';
+import { explorerAddressUrl, explorerPreimageUrl } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 import { useActiveAccount } from '@/lib/activeAccount';
 
@@ -114,7 +114,18 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
       <dl className="kv">
         <div>
           <dt>Creator</dt>
-          <dd>{shorten(proposal.creator)}</dd>
+          <dd>
+            {(() => {
+              const url = explorerAddressUrl(proposal.creator);
+              return url ? (
+                <a href={url} target="_blank" rel="noreferrer" className="addr-plain">
+                  {shorten(proposal.creator)}
+                </a>
+              ) : (
+                shorten(proposal.creator)
+              );
+            })()}
+          </dd>
         </div>
         <div>
           <dt>Call length</dt>
@@ -144,12 +155,26 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
           <span style={{ width: `${pct}%` }} />
         </div>
         <div className="approvers">
-          {proposal.approvers.map((a) => (
-            <span key={a} className={`chip ${approved.includes(a.toLowerCase()) ? 'signed' : ''}`}>
-              {approved.includes(a.toLowerCase()) ? '✓ ' : ''}
-              {shorten(a, 5, 4)}
-            </span>
-          ))}
+          {proposal.approvers.map((a) => {
+            const isSigned = approved.includes(a.toLowerCase());
+            const label = `${isSigned ? '✓ ' : ''}${shorten(a, 5, 4)}`;
+            const url = explorerAddressUrl(a);
+            return url ? (
+              <a
+                key={a}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className={`chip ${isSigned ? 'signed' : ''}`}
+              >
+                {label}
+              </a>
+            ) : (
+              <span key={a} className={`chip ${isSigned ? 'signed' : ''}`}>
+                {label}
+              </span>
+            );
+          })}
         </div>
       </div>
 
