@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAccount, useConnect, useConnectors, useDisconnect, type Connector } from 'wagmi';
 import { useActiveAccount } from '@/lib/activeAccount';
-import { paseoHub } from '@/lib/chain';
+import { chain } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 
 type Address = `0x${string}`;
@@ -134,8 +134,8 @@ export function ConnectModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        {isConnected && chainId !== paseoHub.id && (
-          <div className="notice warn">Wallet is not on {paseoHub.name} — switch network to transact.</div>
+        {isConnected && chainId !== chain.id && (
+          <div className="notice warn">Wallet is not on {chain.name} — switch network to transact.</div>
         )}
         {error && <div className="notice err">{error}</div>}
 

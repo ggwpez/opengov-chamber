@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
-import { paseoHub } from '@/lib/chain';
+import { chain } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 import { contractAbi } from '@/lib/abi';
 import { CONTRACT_ADDRESS, CONTRACT_CONFIGURED } from '@/lib/contract';
@@ -13,7 +13,7 @@ import { WithdrawModal } from './WithdrawModal';
 export function ConnectButton() {
   // `chainId` here is the *wallet's* connected chain (from useAccount), which
   // reflects networks outside our config too. Do NOT use useChainId() — that's
-  // config-scoped and can report paseoHub even while the wallet is on mainnet.
+  // config-scoped and reports our configured chain even while the wallet is elsewhere.
   const { isConnected, chainId } = useAccount();
   const { switchChain, isPending: switching } = useSwitchChain();
   const { activeAddress } = useActiveAccount();
@@ -28,7 +28,7 @@ export function ConnectButton() {
     functionName: 'deposits',
     args: activeAddress ? [activeAddress] : undefined,
     query: {
-      enabled: CONTRACT_CONFIGURED && !!activeAddress && chainId === paseoHub.id,
+      enabled: CONTRACT_CONFIGURED && !!activeAddress && chainId === chain.id,
       refetchInterval: 12_000,
     },
   });
@@ -45,14 +45,14 @@ export function ConnectButton() {
     );
   }
 
-  if (chainId !== paseoHub.id) {
+  if (chainId !== chain.id) {
     return (
       <button
         className="btn"
         disabled={switching}
-        onClick={() => switchChain({ chainId: paseoHub.id })}
+        onClick={() => switchChain({ chainId: chain.id })}
       >
-        {switching ? 'Switching…' : 'Switch to Paseo Hub'}
+        {switching ? 'Switching…' : `Switch to ${chain.name}`}
       </button>
     );
   }

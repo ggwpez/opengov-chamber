@@ -3,6 +3,14 @@ import { defineChain } from 'viem';
 const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ?? 'https://eth-rpc-testnet.polkadot.io/';
 
+// Chain identity, all from build-time env (defaults match Paseo testnet). The
+// native token is presented with 18 decimals over eth-rpc even though the
+// Substrate-side denominations differ.
+const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? '420420417');
+const CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? 'Polkadot Hub TestNet';
+const CHAIN_SYMBOL = process.env.NEXT_PUBLIC_CHAIN_SYMBOL ?? 'PAS';
+const CHAIN_TESTNET = process.env.NEXT_PUBLIC_CHAIN_TESTNET !== 'false';
+
 /**
  * Optional block explorer base URL (e.g. https://assethub-paseo.subscan.io).
  * Left unset → no explorer links anywhere. Trailing slash stripped so callers
@@ -21,17 +29,14 @@ export function explorerPreimageUrl(hash: string): string | undefined {
 }
 
 /**
- * Polkadot Hub TestNet (Paseo) — the eth-rpc compatibility layer in front of
- * Asset Hub's `pallet-revive`. Chain id and endpoint per the Polkadot
- * "Connect to Polkadot" docs.
- *
- * Note: the native token is presented with 18 decimals over eth-rpc even though
- * Paseo's native denomination (PAS) is 10 decimals on the Substrate side.
+ * The eth-rpc compatibility layer in front of a `pallet-revive` Hub. Identity
+ * (id / name / symbol / testnet / rpc) is read from build-time env, defaulting
+ * to Polkadot Hub TestNet (Paseo) — see the env vars at the top of this file.
  */
-export const paseoHub = defineChain({
-  id: 420420417,
-  name: 'Polkadot Hub TestNet',
-  nativeCurrency: { name: 'Paseo', symbol: 'PAS', decimals: 18 },
+export const chain = defineChain({
+  id: CHAIN_ID,
+  name: CHAIN_NAME,
+  nativeCurrency: { name: CHAIN_SYMBOL, symbol: CHAIN_SYMBOL, decimals: 18 },
   rpcUrls: {
     default: { http: [RPC_URL] },
   },
@@ -40,5 +45,5 @@ export const paseoHub = defineChain({
   ...(EXPLORER_URL
     ? { blockExplorers: { default: { name: 'Subscan', url: EXPLORER_URL } } }
     : {}),
-  testnet: true,
+  testnet: CHAIN_TESTNET,
 });

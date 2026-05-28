@@ -6,7 +6,7 @@ import { useAccount, useSwitchChain, useWaitForTransactionReceipt, useWriteContr
 import { BaseError } from 'viem';
 import { contractAbi, DispatchTimeKind, Track } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
-import { paseoHub } from '@/lib/chain';
+import { chain } from '@/lib/chain';
 import { useActiveAccount } from '@/lib/activeAccount';
 import { callHashFromHex, isAddress, isHash32, parseAddresses } from '@/lib/format';
 
@@ -20,7 +20,7 @@ export function ProposeForm() {
 
   // The wallet's actual chain — independent of our wagmi config. If this isn't
   // Paseo Hub, signing would land the TX on the wrong network (e.g. mainnet).
-  const wrongChain = isConnected && chainId !== paseoHub.id;
+  const wrongChain = isConnected && chainId !== chain.id;
 
   const [mode, setMode] = useState<Mode>('hash');
   const [callHash, setCallHash] = useState('');
@@ -91,7 +91,7 @@ export function ProposeForm() {
         // Pin the target chain: wagmi asserts the wallet is on Paseo Hub and
         // throws ChainMismatchError rather than silently signing on whatever
         // network the wallet happens to be set to.
-        chainId: paseoHub.id,
+        chainId: chain.id,
         address: CONTRACT_ADDRESS,
         abi: contractAbi,
         functionName: 'propose',
@@ -229,13 +229,13 @@ export function ProposeForm() {
       {!isConnected && <div className="notice warn">Connect your wallet to create a proposal.</div>}
       {wrongChain && (
         <div className="notice err row spread">
-          <span>Wrong network — your wallet is not on {paseoHub.name}. Submitting here would send the TX to the wrong chain.</span>
+          <span>Wrong network — your wallet is not on {chain.name}. Submitting here would send the TX to the wrong chain.</span>
           <button
             className="btn"
             disabled={switching}
-            onClick={() => switchChain({ chainId: paseoHub.id })}
+            onClick={() => switchChain({ chainId: chain.id })}
           >
-            {switching ? 'Switching…' : `Switch to ${paseoHub.name}`}
+            {switching ? 'Switching…' : `Switch to ${chain.name}`}
           </button>
         </div>
       )}

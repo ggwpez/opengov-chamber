@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ProposeForm } from './ProposeForm';
 import { DispatchTimeKind, Track } from '@/lib/abi';
-import { paseoHub } from '@/lib/chain';
+import { chain } from '@/lib/chain';
 
 const useAccount = vi.fn();
 const useSwitchChain = vi.fn();
@@ -43,7 +43,7 @@ function fillValid() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useAccount.mockReturnValue({ isConnected: true, chainId: paseoHub.id });
+  useAccount.mockReturnValue({ isConnected: true, chainId: chain.id });
   useActiveAccount.mockReturnValue({ activeAddress: CREATOR });
   useSwitchChain.mockReturnValue({ switchChain, isPending: false });
   useWriteContract.mockReturnValue({
@@ -95,7 +95,7 @@ describe('ProposeForm — wrong network', () => {
     expect(createBtn()).toBeDisabled();
     const switchBtn = screen.getByRole('button', { name: /switch to/i });
     fireEvent.click(switchBtn);
-    expect(switchChain).toHaveBeenCalledWith({ chainId: paseoHub.id });
+    expect(switchChain).toHaveBeenCalledWith({ chainId: chain.id });
   });
 });
 
@@ -107,7 +107,7 @@ describe('ProposeForm — submission', () => {
     expect(writeContract).toHaveBeenCalledTimes(1);
     expect(writeContract.mock.calls[0][0]).toMatchObject({
       functionName: 'propose',
-      chainId: paseoHub.id,
+      chainId: chain.id,
       account: CREATOR,
       args: [
         HASH32,

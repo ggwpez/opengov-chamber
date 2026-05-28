@@ -87,13 +87,50 @@ deploy-polkadot: (deploy polkadot_rpc)
 # Deploy to Kusama Hub.
 deploy-kusama:   (deploy kusama_rpc)
 
-# Point the frontend at a deployed contract (rewrites frontend/.env.local).
+# Bump the account nonce with the cheapest possible tx (a 0-value self-transfer,
+# 21000 gas, no calldata) to clear a "Transaction is temporarily banned" (error
+# 1012) from the eth-rpc tx pool — usually left behind by a deploy attempted on a
+# zero-balance account. The account must be funded first. Examples:
+#   just unban                   # -> Paseo testnet (default)
+#   just unban-polkadot          # -> Polkadot Hub mainnet
+unban rpc=paseo_rpc: (account rpc)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cast >/dev/null || { echo "✖ cast not found — install Foundry: https://getfoundry.sh"; exit 1; }
+    : "${PRIVATE_KEY:?✖ set PRIVATE_KEY (export it, or put it in a root .env)}"
+    addr=$(cast wallet address --private-key "$PRIVATE_KEY")
+    echo "▸ sending 0-value self-transfer ($addr → itself) to bump the nonce → {{rpc}}"
+    cast send "$addr" --value 0 --private-key "$PRIVATE_KEY" --rpc-url "{{rpc}}" --json
+    echo "✔ nonce bumped — retry: just deploy {{rpc}}"
+
+# Unban on Polkadot Hub TestNet (Paseo).
+unban-paseo:    (unban paseo_rpc)
+# Unban on Polkadot Hub mainnet.
+unban-polkadot: (unban polkadot_rpc)
+# Unban on Kusama Hub.
+unban-kusama:   (unban kusama_rpc)
+
+# Point the frontend at a deployed contract (rewrites frontend/.env.local). The
+# chain identity (id/name/symbol/testnet) is derived from the rpc so the build
+# self-labels correctly — mainnet builds show "Polkadot Hub", not "Paseo Hub".
 frontend-env addr rpc=paseo_rpc:
     #!/usr/bin/env bash
     set -euo pipefail
+    case "{{rpc}}" in
+      *eth-rpc.polkadot.io*)        id=420420419; name="Polkadot Hub"; sym=DOT; testnet=false ;;
+      *eth-rpc-kusama.polkadot.io*) id=420420418; name="Kusama Hub";   sym=KSM; testnet=false ;;
+      *)                            id=420420417; name="Polkadot Hub TestNet"; sym=PAS; testnet=true ;;
+    esac
     f=frontend/.env.local
-    { echo "NEXT_PUBLIC_CONTRACT_ADDRESS={{addr}}"; echo "NEXT_PUBLIC_RPC_URL={{rpc}}"; } > "$f"
-    echo "✔ wrote $f"
+    {
+      echo "NEXT_PUBLIC_CONTRACT_ADDRESS={{addr}}"
+      echo "NEXT_PUBLIC_RPC_URL={{rpc}}"
+      echo "NEXT_PUBLIC_CHAIN_ID=$id"
+      echo "NEXT_PUBLIC_CHAIN_NAME=$name"
+      echo "NEXT_PUBLIC_CHAIN_SYMBOL=$sym"
+      echo "NEXT_PUBLIC_CHAIN_TESTNET=$testnet"
+    } > "$f"
+    echo "✔ wrote $f ($name, chain $id)"
 
 # Install frontend dependencies.
 frontend-install:

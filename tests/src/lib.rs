@@ -5,8 +5,8 @@
 //! it — including the `XcmPrecompile` that `finalize()` dispatches through.
 
 pub use asset_hub_polkadot_runtime::{
-    Balances, ConvictionVoting, Referenda, Runtime as Test, RuntimeEvent, RuntimeGenesisConfig,
-    RuntimeOrigin, Scheduler, System,
+    Balances, ConvictionVoting, Referenda, Runtime as Test, RuntimeCall, RuntimeEvent,
+    RuntimeGenesisConfig, RuntimeOrigin, Scheduler, System,
 };
 
 use cumulus_pallet_parachain_system::RelaychainDataProvider;

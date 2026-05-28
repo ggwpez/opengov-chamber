@@ -1,6 +1,6 @@
 import { createConfig, http } from 'wagmi';
 import { injected } from 'wagmi/connectors';
-import { paseoHub } from './chain';
+import { chain } from './chain';
 
 /**
  * wagmi config. We only wire the injected connector (MetaMask / any EIP-1193
@@ -8,10 +8,10 @@ import { paseoHub } from './chain';
  * server render from touching `window`.
  */
 export const wagmiConfig = createConfig({
-  chains: [paseoHub],
+  chains: [chain],
   connectors: [injected()],
   transports: {
-    [paseoHub.id]: http(),
+    [chain.id]: http(),
   },
   ssr: true,
 });

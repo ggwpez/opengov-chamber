@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="72 76 344 344" role="img" aria-label="The Chamber — gavel">
+  <!-- the gavel, drawn upright then rotated into a diagonal -->
+  <g transform="rotate(-42 256 256)">
+    <!-- mallet head -->
+    <rect x="146" y="132" width="220" height="82" rx="28" fill="#e6007a"/>
+    <!-- end bands -->
+    <rect x="166" y="124" width="26" height="98" rx="11" fill="#a8005a"/>
+    <rect x="320" y="124" width="26" height="98" rx="11" fill="#a8005a"/>
+    <!-- handle -->
+    <rect x="232" y="176" width="48" height="238" rx="24" fill="#e6007a"/>
+    <!-- handle cap -->
+    <rect x="220" y="396" width="72" height="30" rx="15" fill="#a8005a"/>
+  </g>
+</svg>

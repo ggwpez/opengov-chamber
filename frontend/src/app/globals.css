@@ -149,7 +149,7 @@ a:hover {
   color: var(--magenta-ink);
 }
 .hero p {
-  margin: 22px 0 0;
+  margin: 40px 0 0;
   max-width: 56ch;
   color: var(--muted);
   font-size: 16px;

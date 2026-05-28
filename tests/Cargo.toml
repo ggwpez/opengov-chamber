@@ -9,6 +9,7 @@ asset-hub-polkadot-runtime = { git = "https://github.com/polkadot-fellows/runtim
 
 pallet-revive    = { version = "*" }
 pallet-revive-uapi = { version = "*" }
+pallet-transaction-payment = { version = "*" }
 pallet-referenda = { version = "*" }
 pallet-preimage  = { version = "*" }
 pallet-conviction-voting = { version = "*" }

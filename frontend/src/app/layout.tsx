@@ -26,7 +26,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'The Chamber - OpenGov Referenda Staging Area',
+  title: 'The Chamber - Staging Area for OpenGov Referenda',
   description:
     'Collectively author, approve, and submit OpenGov referenda on Polkadot Hub.',
 };
