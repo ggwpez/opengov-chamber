@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     siteName: 'The Chamber',
     images: [
       {
-        url: '/og.png',
+        url: '/og.jpg',
         width: 2200,
         height: 1150,
         alt: 'The Chamber — author and submit OpenGov referenda together.',
