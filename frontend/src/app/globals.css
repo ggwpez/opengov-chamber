@@ -777,3 +777,30 @@ button.addr-pill:hover {
     scroll-behavior: auto !important;
   }
 }
+
+/* Build provenance: source link + deploy timestamp. Quiet mono footer, hairline
+   rule above it, mirroring the ledger/section-label treatment. */
+.sitefoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 18px;
+  margin-top: 64px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.sitefoot-link {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+.sitefoot-link:hover {
+  color: var(--magenta-ink);
+}
+.sitefoot-meta {
+  letter-spacing: 0.02em;
+}

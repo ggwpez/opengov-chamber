@@ -4,6 +4,15 @@ import { ProposalList } from '@/components/ProposalList';
 import { CONTRACT_ADDRESS, CONTRACT_CONFIGURED } from '@/lib/contract';
 import { chain, explorerAddressUrl } from '@/lib/chain';
 
+const REPO_URL = 'https://github.com/ggwpez/opengov-chamber';
+
+// Inlined at build time by next.config.mjs. Formatted from the ISO string by
+// slicing (no Date locale methods) so the static prerender and any future
+// client render are byte-identical — no hydration drift.
+const COMMIT_SHA = process.env.NEXT_PUBLIC_COMMIT_SHA || '';
+const BUILD_TIME = process.env.NEXT_PUBLIC_BUILD_TIME || '';
+const builtAt = BUILD_TIME ? `${BUILD_TIME.slice(0, 10)} ${BUILD_TIME.slice(11, 16)} UTC` : null;
+
 export default function Home() {
   return (
     <main className="shell">
@@ -45,6 +54,13 @@ export default function Home() {
 
       <div className="section-label">The ledger</div>
       <ProposalList />
+
+      <footer className="sitefoot">
+        <a href={REPO_URL} target="_blank" rel="noreferrer" className="sitefoot-link">
+          Source on GitHub{COMMIT_SHA ? ` · ${COMMIT_SHA}` : ''}
+        </a>
+        {builtAt ? <span className="sitefoot-meta">Deployed {builtAt}</span> : null}
+      </footer>
     </main>
   );
 }
