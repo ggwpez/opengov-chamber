@@ -1422,3 +1422,90 @@ fn full_cycle_refund_from_passed_referendum() {
         assert_eq!(deposit_of(addr, Address::from(ALICE_ADDR.0)), U256::ZERO);
     });
 }
+
+// ----------------------------------------------- global proposal-store capacity
+//
+// Every accepted proposal appends its 32-byte key to a SINGLE storage value,
+// `all_proposal_keys` (see `set_all_proposal_keys`). pallet-revive caps any one
+// storage value at `limits::STORAGE_BYTES`, so that list can hold only a fixed
+// handful of keys — and nothing ever removes a key (close merely flips a status
+// byte). So the contract has a hard, permanent ceiling on the number of
+// proposals it will *ever* accept, regardless of how many are closed/submitted.
+//
+// This test demonstrates the bug: it proposes distinct proposals until the
+// contract refuses one, then asserts the store isn't capped at a small number.
+// It currently FAILS — the contract bricks after ~a dozen — and is the
+// regression guard for moving `all_proposal_keys` to a scalable index
+// (enumerable set with per-key storage, or off-chain event indexing).
+
+/// How many distinct proposals a healthy store should comfortably accept.
+const TARGET_PROPOSALS: u8 = 40;
+
+#[test]
+fn many_distinct_proposals_can_be_created() {
+    new_test_ext().execute_with(|| {
+        // ALICE is endowed far beyond what dozens of storage deposits cost, so
+        // any failure below is the *structural* key-list cap, not insolvency.
+        fund(&ALICE, ENDOWMENT);
+
+        let addr = BareInstantiateBuilder::<Test>::bare_instantiate(
+            RuntimeOrigin::signed(ALICE),
+            Code::Upload(BLOB.to_vec()),
+        )
+        .transaction_limits(limits())
+        .build_and_unwrap_contract()
+        .addr;
+
+        // Each proposal differs only by `callHash`, so every one hashes to a
+        // distinct `proposal_key` — sidestepping the duplicate-proposal revert.
+        // The only thing that grows is the single-value `all_proposal_keys` list.
+        let mut stored = 0u32;
+        for seed in 0..TARGET_PROPOSALS {
+            let res = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+                .data(
+                    Contract::proposeCall {
+                        callHash: B256::repeat_byte(seed),
+                        callLen: 42,
+                        enactment: Contract::DispatchTime {
+                            kind: Contract::DispatchTimeKind::After,
+                            block: 100,
+                        },
+                        track: Contract::Track::WhitelistedCaller,
+                        approvers: vec![Address::from(BOB_ADDR.0)],
+                        minApprovers: U256::from(1u64),
+                    }
+                    .abi_encode(),
+                )
+                .transaction_limits(limits())
+                .build();
+
+            match res.result {
+                Ok(ref exec) if !exec.did_revert() => {
+                    stored += 1;
+                    eprintln!("stored proposal #{stored}");
+                }
+                Ok(_) => {
+                    eprintln!("proposal #{} REVERTED — store is full", seed + 1);
+                    break;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "proposal #{} TRAPPED at the runtime ({e:?}) — store is full",
+                        seed + 1
+                    );
+                    break;
+                }
+            }
+        }
+
+        eprintln!("\ncontract accepted {stored} proposals before refusing more");
+
+        assert!(
+            stored >= u32::from(TARGET_PROPOSALS),
+            "contract stopped accepting proposals after {stored}, but should handle \
+             at least {TARGET_PROPOSALS}. The single-value `all_proposal_keys` list \
+             overflowed pallet-revive's STORAGE_BYTES cap and no key is ever removed, \
+             so the store is permanently bricked. Needs a scalable index.",
+        );
+    });
+}
