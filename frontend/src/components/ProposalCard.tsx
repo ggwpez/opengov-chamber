@@ -8,7 +8,7 @@ import { contractAbi, DispatchTimeKind, ProposalStatus, Track, type Proposal } f
 import { CONTRACT_ADDRESS } from '@/lib/contract';
 import { FINALIZE_DEPOSIT } from '@/lib/constants';
 import { proposalKey } from '@/lib/proposalKey';
-import { explorerAddressUrl, explorerPreimageUrl } from '@/lib/chain';
+import { CHAIN_SYMBOL, explorerAddressUrl, explorerPreimageUrl } from '@/lib/chain';
 import { shorten } from '@/lib/format';
 import { useActiveAccount } from '@/lib/activeAccount';
 
@@ -200,7 +200,7 @@ export function ProposalCard({ proposal, index }: { proposal: Proposal; index: n
           </button>
           {isCreator && (
             <button className="btn btn-mint" disabled={!canFinalize || busy} onClick={() => run('finalize')}>
-              {busy && action === 'finalize' ? 'Submitting…' : `Finalize · ${formatEther(FINALIZE_DEPOSIT)} PAS`}
+              {busy && action === 'finalize' ? 'Submitting…' : `Finalize · ${formatEther(FINALIZE_DEPOSIT)} ${CHAIN_SYMBOL}`}
             </button>
           )}
           {canClose && (

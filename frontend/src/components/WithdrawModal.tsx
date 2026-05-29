@@ -6,6 +6,7 @@ import { useBalance, useReadContract, useWaitForTransactionReceipt, useWriteCont
 import { BaseError, formatEther } from 'viem';
 import { contractAbi } from '@/lib/abi';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
+import { CHAIN_SYMBOL } from '@/lib/chain';
 import { useActiveAccount } from '@/lib/activeAccount';
 
 /**
@@ -68,11 +69,11 @@ export function WithdrawModal({ onClose }: { onClose: () => void }) {
         <dl className="kv" style={{ marginTop: 16 }}>
           <div>
             <dt>Owed to you</dt>
-            <dd>{formatEther(owedAmount)} PAS</dd>
+            <dd>{formatEther(owedAmount)} {CHAIN_SYMBOL}</dd>
           </div>
           <div>
             <dt>Contract balance</dt>
-            <dd>{contractBalance ? `${formatEther(contractBalance.value)} PAS` : '…'}</dd>
+            <dd>{contractBalance ? `${formatEther(contractBalance.value)} ${CHAIN_SYMBOL}` : '…'}</dd>
           </div>
         </dl>
 
@@ -84,7 +85,7 @@ export function WithdrawModal({ onClose }: { onClose: () => void }) {
 
         <div className="modal-foot">
           <button className="btn btn-primary" onClick={withdraw} disabled={busy || nothingOwed || isSuccess}>
-            {busy ? 'Withdrawing…' : nothingOwed ? 'Nothing to withdraw' : `Withdraw ${formatEther(owedAmount)} PAS`}
+            {busy ? 'Withdrawing…' : nothingOwed ? 'Nothing to withdraw' : `Withdraw ${formatEther(owedAmount)} ${CHAIN_SYMBOL}`}
           </button>
         </div>
       </div>

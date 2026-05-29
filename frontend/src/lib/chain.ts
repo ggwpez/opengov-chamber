@@ -8,7 +8,7 @@ const RPC_URL =
 // Substrate-side denominations differ.
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? '420420417');
 const CHAIN_NAME = process.env.NEXT_PUBLIC_CHAIN_NAME ?? 'Polkadot Hub TestNet';
-const CHAIN_SYMBOL = process.env.NEXT_PUBLIC_CHAIN_SYMBOL ?? 'PAS';
+export const CHAIN_SYMBOL = process.env.NEXT_PUBLIC_CHAIN_SYMBOL ?? 'PAS';
 const CHAIN_TESTNET = process.env.NEXT_PUBLIC_CHAIN_TESTNET !== 'false';
 
 /**
