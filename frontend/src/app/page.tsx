@@ -1,5 +1,4 @@
 import { ConnectButton } from '@/components/ConnectButton';
-import { DestroyButton } from '@/components/DestroyButton';
 import { ProposeForm } from '@/components/ProposeForm';
 import { ProposalList } from '@/components/ProposalList';
 import { CONTRACT_ADDRESS, CONTRACT_CONFIGURED } from '@/lib/contract';
@@ -62,7 +61,6 @@ export default function Home() {
         </a>
         <span className="sitefoot-right">
           {builtAt ? <span className="sitefoot-meta">Deployed {builtAt}</span> : null}
-          <DestroyButton />
         </span>
       </footer>
     </main>

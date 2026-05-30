@@ -22,7 +22,7 @@ t: test
 # ---------------------------------------------------------------- deployment
 
 # Show the deploying account's address and native balance, fail if it's zero.
-account rpc=paseo_rpc:
+account rpc=polkadot_rpc:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cast >/dev/null || { echo "✖ cast not found — install Foundry: https://getfoundry.sh"; exit 1; }
@@ -109,6 +109,72 @@ unban-paseo:    (unban paseo_rpc)
 unban-polkadot: (unban polkadot_rpc)
 # Unban on Kusama Hub.
 unban-kusama:   (unban kusama_rpc)
+
+# Read the contract's on-chain `deployer()` — the owner account `destroy` accepts
+# and the frontend gates its destroy button on. Read-only (no key needed). The
+# address and rpc default to whatever `just frontend-env` wrote into
+# frontend/.env.local; override either positionally. Examples:
+#   just deployer                                              # use frontend/.env.local
+#   just deployer 0xCONTRACT                                   # explicit address
+#   just deployer 0xCONTRACT https://eth-rpc.polkadot.io/      # explicit address + rpc
+deployer addr="" rpc="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cast >/dev/null || { echo "✖ cast not found — install Foundry: https://getfoundry.sh"; exit 1; }
+    env=frontend/.env.local
+    addr="{{addr}}"
+    rpc="{{rpc}}"
+    # Fall back to the values `just frontend-env` baked into the frontend env file.
+    # Grep the specific keys rather than sourcing it (NEXT_PUBLIC_CHAIN_NAME has a
+    # space, so `. .env.local` under `set -e` would try to run it as a command).
+    if [ -f "$env" ]; then
+      [ -n "$addr" ] || addr=$(grep -E '^NEXT_PUBLIC_CONTRACT_ADDRESS=' "$env" | head -1 | cut -d= -f2-)
+      [ -n "$rpc"  ] || rpc=$(grep -E '^NEXT_PUBLIC_RPC_URL=' "$env" | head -1 | cut -d= -f2-)
+    fi
+    rpc="${rpc:-{{paseo_rpc}}}"
+    [ -n "$addr" ] || { echo "✖ no contract address — pass one (just deployer 0x… [rpc]) or run: just frontend-env <addr> <rpc>"; exit 1; }
+    echo "▸ deployer() of $addr → $rpc"
+    cast call "$addr" "deployer()(address)" --rpc-url "$rpc"
+
+# Tear the contract down via `destroy()`: removes its code + storage and sweeps the
+# remaining balance to the deployer. IRREVERSIBLE. Requires PRIVATE_KEY (in the env
+# or a root .env) to be the contract's deployer — the call reverts with NotOwner
+# otherwise, and with OutstandingDeposits if it still owes anyone a refund. Address
+# and rpc default from frontend/.env.local, like `just deployer`. Set FORCE=1 to skip
+# the confirmation prompt. Examples:
+#   just destroy                           # use frontend/.env.local
+#   just destroy 0xCONTRACT https://eth-rpc.polkadot.io/
+destroy addr="" rpc="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cast >/dev/null || { echo "✖ cast not found — install Foundry: https://getfoundry.sh"; exit 1; }
+    : "${PRIVATE_KEY:?✖ set PRIVATE_KEY (export it, or put it in a root .env)}"
+    env=frontend/.env.local
+    addr="{{addr}}"
+    rpc="{{rpc}}"
+    if [ -f "$env" ]; then
+      [ -n "$addr" ] || addr=$(grep -E '^NEXT_PUBLIC_CONTRACT_ADDRESS=' "$env" | head -1 | cut -d= -f2-)
+      [ -n "$rpc"  ] || rpc=$(grep -E '^NEXT_PUBLIC_RPC_URL=' "$env" | head -1 | cut -d= -f2-)
+    fi
+    rpc="${rpc:-{{paseo_rpc}}}"
+    [ -n "$addr" ] || { echo "✖ no contract address — pass one (just destroy 0x… [rpc]) or run: just frontend-env <addr> <rpc>"; exit 1; }
+    caller=$(cast wallet address --private-key "$PRIVATE_KEY" 2>/dev/null) || {
+      echo "✖ invalid PRIVATE_KEY — expected a 0x-prefixed 32-byte secp256k1 key"; exit 1; }
+    # Fail fast if this key isn't the deployer: destroy() would just revert with
+    # NotOwner (and may leave a banned tx in the pool — see `just unban`).
+    onchain=$(cast call "$addr" "deployer()(address)" --rpc-url "$rpc")
+    if [ "$(printf '%s' "$caller" | tr 'A-F' 'a-f')" != "$(printf '%s' "$onchain" | tr 'A-F' 'a-f')" ]; then
+      echo "✖ PRIVATE_KEY ($caller) is not the deployer ($onchain) — destroy() would revert with NotOwner"; exit 1
+    fi
+    echo "▸ about to destroy $addr on $rpc"
+    echo "  caller: $caller (deployer ✓)"
+    if [ "${FORCE:-0}" != "1" ]; then
+      read -r -p "⚠ IRREVERSIBLE — this removes the contract and sweeps its balance. Type 'destroy' to confirm: " reply
+      [ "$reply" = "destroy" ] || { echo "aborted"; exit 1; }
+    fi
+    out=$(cast send "$addr" "destroy()" --private-key "$PRIVATE_KEY" --rpc-url "$rpc" --json)
+    echo "$out"
+    echo "✔ destroy() sent — verify removal: just deployer $addr $rpc (should now fail to return)"
 
 # Point the frontend at a deployed contract (rewrites frontend/.env.local). The
 # chain identity (id/name/symbol/testnet) is derived from the rpc so the build
