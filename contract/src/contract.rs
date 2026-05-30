@@ -383,12 +383,16 @@ fn finalize_proposal(key: &[u8; 32]) -> Result<Contract::Proposal, ProposalError
     Ok(proposal)
 }
 
-/// Storage key for a depositor's running tally: `keccak256("deposit:" ++ addr)`.
+/// Storage key for a depositor's running tally: the `b"deposit:"` tag followed
+/// by the 20-byte address, as a bare 32-byte key (8 + 20, the trailing 4 bytes
+/// zero). No `keccak256` is needed — the key only has to be unique, and
+/// pallet-revive already hashes every storage key into its trie (`blake2_256`
+/// for this fixed-size access path).
 fn deposit_key(addr: &Address) -> [u8; 32] {
-    let mut buf = Vec::with_capacity(8 + 20);
-    buf.extend_from_slice(b"deposit:");
-    buf.extend_from_slice(addr.as_slice());
-    keccak256(&buf).0
+    let mut key = [0u8; 32];
+    key[..8].copy_from_slice(b"deposit:");
+    key[8..28].copy_from_slice(addr.as_slice());
+    key
 }
 
 fn get_deposit(addr: &Address) -> U256 {
@@ -416,13 +420,28 @@ fn increase_deposit(addr: &Address, amount: U256) {
 /// Storage key for the aggregate of every depositor's unrefunded tally. Tracked
 /// so `destroy` can cheaply assert "nobody is owed anything" without iterating
 /// the per-depositor `deposit:` slots (which storage can't enumerate).
-fn total_owed_key() -> [u8; 32] {
-    keccak256(b"total_owed:").0
+///
+/// A bare, zero-padded 32-byte key — its leading `b"total_owed"` tag can never
+/// alias a `deposit:` key (those start with `b"deposit:"`). No hashing: it's a
+/// constant, and pallet-revive hashes the key into its trie regardless.
+const TOTAL_OWED_KEY: [u8; 32] = fixed_domain_key(b"total_owed");
+
+/// Pack a short domain tag into a fixed 32-byte storage key, zero-padded. Used
+/// for the fixed-size (`set_storage_or_clear`) access path, which requires a
+/// `[u8; 32]` key. The tag must be ≤ 32 bytes.
+const fn fixed_domain_key(tag: &[u8]) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    let mut i = 0;
+    while i < tag.len() {
+        key[i] = tag[i];
+        i += 1;
+    }
+    key
 }
 
 fn get_total_owed() -> U256 {
     let mut buf = [0u8; 32];
-    api::get_storage_or_zero(StorageFlags::empty(), &total_owed_key(), &mut buf);
+    api::get_storage_or_zero(StorageFlags::empty(), &TOTAL_OWED_KEY, &mut buf);
     U256::from_le_bytes::<32>(buf)
 }
 
@@ -431,7 +450,7 @@ fn set_total_owed(amount: U256) {
     // hits zero (the fully-refunded steady state), mirroring `set_deposit`.
     api::set_storage_or_clear(
         StorageFlags::empty(),
-        &total_owed_key(),
+        &TOTAL_OWED_KEY,
         &amount.to_le_bytes::<32>(),
     );
 }
