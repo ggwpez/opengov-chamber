@@ -1280,6 +1280,135 @@ fn refund_reverts_and_preserves_tally_when_contract_is_short() {
     });
 }
 
+// ------------------------------------------------------------------- destroy
+//
+// `destroy` lets the original deployer tear the contract down through
+// pallet-revive's `terminate`, sweeping the remaining balance back to them. Two
+// guards keep it honest:
+//   - caller must be the deployer (recorded in immutable data at construction);
+//   - the contract must owe nobody — the aggregate `total_owed` tally is zero —
+//     since `terminate` sweeps the *whole* balance to one beneficiary and would
+//     otherwise strand other depositors' refunds.
+
+/// The happy path: the deployer destroys a contract that owes nothing. The call
+/// succeeds, the contract's balance is swept to the deployer, and the contract
+/// ceases to exist (a follow-up call no longer executes).
+#[test]
+fn destroy_by_deployer_sweeps_balance_and_removes_contract() {
+    use frame_support::traits::fungible::Inspect;
+    use pallet_revive::AddressMapper;
+
+    new_test_ext().execute_with(|| {
+        // Deployed by ALICE; no `finalize` has run, so nothing is owed.
+        let (addr, _) = setup_with_proposal();
+        let contract_acct = <Test as pallet_revive::Config>::AddressMapper::to_account_id(&addr);
+
+        // Seed a balance so the sweep to the deployer is observable.
+        fund(&contract_acct, ENDOWMENT);
+        let alice_before = Balances::balance(&ALICE);
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::destroyCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        // The contract balance landed with ALICE (deployer == beneficiary)...
+        assert!(
+            Balances::balance(&ALICE) > alice_before,
+            "terminate must sweep the contract balance to the deployer",
+        );
+        // ...and the contract account is fully drained.
+        assert_eq!(
+            Balances::balance(&contract_acct),
+            0,
+            "destroyed contract must retain no balance",
+        );
+
+        // The contract is genuinely gone — not merely EIP-6780-swept. Read
+        // pallet-revive's `AccountInfoOf` storage entry directly: its absence is
+        // the authoritative signal that the code + account were removed (a call
+        // to a code-less address would otherwise succeed as if it were an EOA).
+        assert!(
+            !revive_account_exists(addr),
+            "pallet-revive must hold no AccountInfo for a destroyed contract",
+        );
+    });
+}
+
+/// Whether pallet-revive still has an `AccountInfoOf` entry for `addr` — i.e.
+/// whether the chain still knows about a contract there. Reads the storage map
+/// directly (it isn't part of the public API): the map uses the `Identity`
+/// hasher, so the key is just the pallet/storage prefix followed by the raw
+/// 20-byte address. The pallet name is resolved via `PalletInfoAccess` rather
+/// than hardcoded.
+fn revive_account_exists(addr: H160) -> bool {
+    use frame_support::traits::PalletInfoAccess;
+    let pallet = <pallet_revive::Pallet<Test> as PalletInfoAccess>::name();
+    let prefix = frame_support::storage::storage_prefix(pallet.as_bytes(), b"AccountInfoOf");
+    let mut key = prefix.to_vec();
+    key.extend_from_slice(addr.as_bytes());
+    frame_support::storage::unhashed::exists(&key)
+}
+
+/// Only the deployer may destroy. A non-deployer (even a participant like BOB)
+/// is rejected with `NotOwner`, and the contract stays alive.
+#[test]
+fn destroy_by_non_deployer_reverts() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, _) = setup_with_proposal(); // deployed by ALICE
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::destroyCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+
+        assert_eq!(result.flags, ReturnFlags::REVERT);
+        assert_eq!(
+            result.data,
+            <Contract::NotOwner as SolError>::abi_encode(&Contract::NotOwner {}),
+        );
+
+        // The contract is untouched — pallet-revive still has its account.
+        assert!(
+            revive_account_exists(addr),
+            "a rejected destroy must leave the contract in place",
+        );
+    });
+}
+
+/// While the contract still owes a deposit, even the deployer is blocked with
+/// `OutstandingDeposits`, and the contract stays in place. (The realistic
+/// success path — owed cleared by the deposit round-tripping back through a
+/// concluded referendum, then `destroy` fully removing the contract — is proven
+/// as the capstone of `full_cycle_refund_from_passed_referendum`.)
+#[test]
+fn destroy_reverts_with_outstanding_deposits() {
+    new_test_ext().execute_with(|| {
+        // ALICE deploys, finalizes, and is now owed the SubmissionDeposit.
+        let addr = approved_and_finalized();
+
+        let blocked = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::destroyCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(blocked.flags, ReturnFlags::REVERT);
+        assert_eq!(
+            blocked.data,
+            <Contract::OutstandingDeposits as SolError>::abi_encode(
+                &Contract::OutstandingDeposits {}
+            ),
+        );
+
+        // The gate held: the contract is untouched.
+        assert!(
+            revive_account_exists(addr),
+            "destroy must not remove a contract that still owes deposits",
+        );
+    });
+}
+
 // --------------------------------------------------- full deposit round-trip
 //
 // The refund tests above stub out the hard part: `refund_pays_caller_and_zeroes_tally`
@@ -1420,6 +1549,21 @@ fn full_cycle_refund_from_passed_referendum() {
             "the original payer must get the full SubmissionDeposit back",
         );
         assert_eq!(deposit_of(addr, Address::from(ALICE_ADDR.0)), U256::ZERO);
+
+        // Capstone: everything has settled — nothing is owed (tally zero) and the
+        // referendum's deposit has been unreserved off the contract — so the
+        // deployer can now genuinely tear the contract down. This is the realistic
+        // end-of-life path: `terminate` only fully removes a contract once it holds
+        // no reserved/held balance, which is exactly the post-settlement state.
+        let destroyed = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::destroyCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(destroyed.flags, ReturnFlags::empty());
+        assert!(
+            !revive_account_exists(addr),
+            "a fully-settled contract must be removed by destroy",
+        );
     });
 }
 
@@ -1440,6 +1584,64 @@ fn full_cycle_refund_from_passed_referendum() {
 
 /// How many distinct proposals a healthy store should comfortably accept.
 const TARGET_PROPOSALS: u8 = 40;
+
+/// `allProposals` must walk the whole linked list, not just return the head.
+/// Proposes three distinct proposals and asserts every one comes back — in
+/// newest-first order, since `add_proposal_key` prepends.
+#[test]
+fn all_proposals_lists_every_proposal_newest_first() {
+    new_test_ext().execute_with(|| {
+        fund(&ALICE, ENDOWMENT);
+
+        let addr = BareInstantiateBuilder::<Test>::bare_instantiate(
+            RuntimeOrigin::signed(ALICE),
+            Code::Upload(BLOB.to_vec()),
+        )
+        .transaction_limits(limits())
+        .build_and_unwrap_contract()
+        .addr;
+
+        // Propose three proposals that differ only by callHash (0x01, 0x02, 0x03).
+        for seed in 1..=3u8 {
+            let res = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+                .data(
+                    Contract::proposeCall {
+                        callHash: B256::repeat_byte(seed),
+                        callLen: 42,
+                        enactment: Contract::DispatchTime {
+                            kind: Contract::DispatchTimeKind::After,
+                            block: 100,
+                        },
+                        track: Contract::Track::WhitelistedCaller,
+                        approvers: vec![Address::from(BOB_ADDR.0)],
+                        minApprovers: U256::from(1u64),
+                    }
+                    .abi_encode(),
+                )
+                .transaction_limits(limits())
+                .build_and_unwrap_result();
+            assert_eq!(res.flags, ReturnFlags::empty());
+        }
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(ALICE), addr)
+            .data(Contract::allProposalsCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        let all = <Vec<Contract::Proposal>>::abi_decode_validate(&result.data).unwrap();
+
+        // All three are present, head (last proposed) first.
+        let call_hashes: Vec<B256> = all.iter().map(|p| p.callHash).collect();
+        assert_eq!(
+            call_hashes,
+            vec![
+                B256::repeat_byte(3),
+                B256::repeat_byte(2),
+                B256::repeat_byte(1),
+            ],
+            "allProposals must return every linked proposal, newest first",
+        );
+    });
+}
 
 #[test]
 fn many_distinct_proposals_can_be_created() {
@@ -1482,23 +1684,15 @@ fn many_distinct_proposals_can_be_created() {
             match res.result {
                 Ok(ref exec) if !exec.did_revert() => {
                     stored += 1;
-                    eprintln!("stored proposal #{stored}");
                 }
                 Ok(_) => {
-                    eprintln!("proposal #{} REVERTED — store is full", seed + 1);
                     break;
                 }
-                Err(e) => {
-                    eprintln!(
-                        "proposal #{} TRAPPED at the runtime ({e:?}) — store is full",
-                        seed + 1
-                    );
+                Err(_) => {
                     break;
                 }
             }
         }
-
-        eprintln!("\ncontract accepted {stored} proposals before refusing more");
 
         assert!(
             stored >= u32::from(TARGET_PROPOSALS),

@@ -62,6 +62,8 @@ interface Contract {
     error InsufficientDeposit();
     error ProposalNotFound();
     error NotOwner();
+    // `destroy` was called while the contract still owes deposits to someone.
+    error OutstandingDeposits();
 
     function allProposals() external view returns (Proposal[] memory);
     function proposal(bytes32 proposalHash) external view returns (Proposal memory);
@@ -74,4 +76,7 @@ interface Contract {
     function close(bytes32 proposalHash) external;
     // Refund the caller's entire recorded deposit back to the caller.
     function refund() external;
+    // Destroy the contract and send its remaining balance to the original deployer.
+    // Reverts unless the caller is the deployer and the contract owes no deposits.
+    function destroy() external;
 }

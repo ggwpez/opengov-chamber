@@ -16,14 +16,46 @@ extern crate alloc;
 use alloc::{vec, vec::Vec};
 
 /// Upper bound on any single storage value, matching pallet-revive's
-/// `STORAGE_BYTES` limit. The packed [`codec`] format caps proposals at exactly
-/// this; the all-keys list also has to fit within it (≤ 12 keys at present).
+/// `STORAGE_BYTES` limit. Each proposal is stored as one value, so this bounds
+/// the size of a single proposal (hence approvers-per-proposal) — *not* the
+/// number of proposals, which the linked list below grows without bound.
 const MAX_STORAGE_BYTES: usize = codec::MAX_ENCODED_LEN;
-const ALL_PROPOSAL_KEYS_KEY: &[u8] = b"all_proposal_keys";
+
+/// Head of the intrusive singly-linked list threading every proposal key (see
+/// [`add_proposal_key`]): a storage slot holding the most-recently-added key,
+/// or all-zeroes when there are no proposals.
+const PROPOSALS_HEAD_KEY: &[u8] = b"proposals_head";
+
+/// Domain tag for a key's "next" link slot, `keccak(tag || key)`. Distinct from
+/// the `b"Proposal:"` identity domain so link slots never alias proposal slots.
+const PROPOSAL_NEXT_DOMAIN: &[u8] = b"proposal_next:";
+
+/// pallet-revive's builtin **System precompile**, at the literal address
+/// `0x900`. (Builtin precompiles bake the matcher value straight into the
+/// trailing address bytes — no `<< 16` shift, unlike the *public* `AddressMatcher`
+/// that places the XCM precompile at `0x0A << 16`.) Its `terminate(address)`
+/// routes to the runtime's `terminate_caller`, the only path that *actually*
+/// removes an already-deployed contract.
+const SYSTEM_PRECOMPILE_ADDR: [u8; 20] =
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x09, 0];
+
+/// Minimal ABI for the one System-precompile call we make. The contract's own
+/// `Contract.sol` is unrelated, so we declare just `terminate(address)` here.
+mod isystem {
+    alloy_core::sol! {
+        function terminate(address beneficiary) external;
+    }
+}
 
 /// This is the constructor which is called once per contract.
+///
+/// Records the deployer in immutable data so `destroy` can both gate on them
+/// (only they may tear the contract down) and pay the remaining balance back to
+/// them. Immutable data is write-once, constructor-only — exactly this use.
 #[polkavm_derive::polkavm_export]
-pub extern "C" fn deploy() {}
+pub extern "C" fn deploy() {
+    api::set_immutable_data(get_caller().as_slice());
+}
 
 /// This is the regular entry point when the contract is called.
 #[polkavm_derive::polkavm_export]
@@ -172,6 +204,47 @@ pub extern "C" fn call() {
             api::return_value(ReturnFlags::empty(), &[]);
         }
 
+        Contract::destroyCall::SELECTOR => {
+            // Only the original deployer may tear the contract down.
+            let deployer = get_deployer();
+            if get_caller() != deployer {
+                revert_not_owner();
+            }
+            // Never destroy while deposits are still owed: termination sweeps the
+            // entire balance to the deployer, which would strand every other
+            // depositor's `refund`. The aggregate tally must be exactly zero.
+            if get_total_owed() != U256::ZERO {
+                revert_outstanding_deposits();
+            }
+            // Genuinely remove the contract — code, storage, account — and sweep
+            // the balance to the deployer, by calling the System precompile's
+            // `terminate(beneficiary)` (the runtime's `terminate_caller` path).
+            //
+            // We deliberately do NOT use the bare `terminate` host syscall: that
+            // follows EIP-6780 and only deletes a contract destroyed in the same
+            // transaction it was created in. For an already-deployed contract it
+            // would merely sweep the free balance and leave the code + storage
+            // on-chain — no actual undeploy.
+            let input = isystem::terminateCall {
+                beneficiary: deployer,
+            }
+            .abi_encode();
+            let res = api::call(
+                CallFlags::empty(),
+                &SYSTEM_PRECOMPILE_ADDR,
+                u64::MAX,       // ref_time limit: use all available
+                u64::MAX,       // proof_size limit: use all available
+                &[u8::MAX; 32], // no storage deposit limit
+                &[0u8; 32],     // no value transferred
+                &input,
+                None,
+            );
+            if res.is_err() {
+                api::return_value(ReturnFlags::REVERT, &[]);
+            }
+            api::return_value(ReturnFlags::empty(), &[]);
+        }
+
         Contract::closeCall::SELECTOR => {
             let close_call = Contract::closeCall::abi_decode_validate(&call_data)
                 .expect("Failed to decode close call");
@@ -208,30 +281,56 @@ fn set_proposal(prop: &Contract::Proposal) {
     api::set_storage(StorageFlags::empty(), &key, &out);
 }
 
-fn set_all_proposal_keys(keys: &Vec<[u8; 32]>) {
-    api::set_storage(
-        StorageFlags::empty(),
-        ALL_PROPOSAL_KEYS_KEY,
-        &keys.abi_encode(),
-    );
+/// Storage slot holding the key added immediately before `key` — its "next"
+/// pointer in the linked list. `keccak(PROPOSAL_NEXT_DOMAIN || key)`.
+fn proposal_next_slot(key: &[u8; 32]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(PROPOSAL_NEXT_DOMAIN.len() + 32);
+    buf.extend_from_slice(PROPOSAL_NEXT_DOMAIN);
+    buf.extend_from_slice(key);
+    keccak256(&buf).0
 }
 
-fn get_all_proposal_keys() -> Vec<[u8; 32]> {
-    let mut buf = [0u8; MAX_STORAGE_BYTES];
+/// Read a 32-byte link value from `slot`, or all-zeroes if the slot is empty.
+/// Every link we store is exactly 32 bytes, so the zero-initialised buffer is
+/// returned verbatim on a hit and doubles as the end-of-list sentinel on a miss.
+fn read_link(slot: &[u8]) -> [u8; 32] {
+    let mut buf = [0u8; 32];
     let mut out: &mut [u8] = &mut buf;
-
-    if api::get_storage(StorageFlags::empty(), ALL_PROPOSAL_KEYS_KEY, &mut out).is_err() {
-        return Vec::new();
+    if api::get_storage(StorageFlags::empty(), slot, &mut out).is_err() {
+        return [0u8; 32];
     }
-    <Vec<FixedBytes<32>>>::abi_decode_validate(&out)
-        .map(|v| v.into_iter().map(|fb| fb.0).collect())
-        .unwrap_or_default()
+    buf
 }
 
+/// The most-recently-added proposal key, or all-zeroes when the list is empty.
+fn get_head() -> [u8; 32] {
+    read_link(PROPOSALS_HEAD_KEY)
+}
+
+/// Prepend `key` to the proposal linked list. Each key occupies its own storage
+/// value, so the list grows without bound — there is no single-value cap on the
+/// number of proposals (the old `Vec`-in-one-value layout hit `STORAGE_BYTES`
+/// at 11 keys). O(1): one link write + one head write.
+///
+/// `propose` rejects duplicate keys before calling this, so a key is never
+/// linked twice (which would cycle the list).
 fn add_proposal_key(key: [u8; 32]) {
-    let mut keys = get_all_proposal_keys();
-    keys.push(key);
-    set_all_proposal_keys(&keys);
+    let prev_head = get_head();
+    // `key.next = old head`, then `head = key`.
+    api::set_storage(StorageFlags::empty(), &proposal_next_slot(&key), &prev_head);
+    api::set_storage(StorageFlags::empty(), PROPOSALS_HEAD_KEY, &key);
+}
+
+/// Walk the list from the head, newest first, collecting every proposal key.
+/// Stops at the all-zero sentinel (the first-ever proposal's `next`).
+fn get_all_proposal_keys() -> Vec<[u8; 32]> {
+    let mut keys = Vec::new();
+    let mut cur = get_head();
+    while cur != [0u8; 32] {
+        keys.push(cur);
+        cur = read_link(&proposal_next_slot(&cur));
+    }
+    keys
 }
 
 fn get_all_proposals() -> Vec<Contract::Proposal> {
@@ -311,11 +410,38 @@ fn set_deposit(addr: &Address, amount: U256) {
 
 fn increase_deposit(addr: &Address, amount: U256) {
     set_deposit(addr, get_deposit(addr).saturating_add(amount));
+    set_total_owed(get_total_owed().saturating_add(amount));
+}
+
+/// Storage key for the aggregate of every depositor's unrefunded tally. Tracked
+/// so `destroy` can cheaply assert "nobody is owed anything" without iterating
+/// the per-depositor `deposit:` slots (which storage can't enumerate).
+fn total_owed_key() -> [u8; 32] {
+    keccak256(b"total_owed:").0
+}
+
+fn get_total_owed() -> U256 {
+    let mut buf = [0u8; 32];
+    api::get_storage_or_zero(StorageFlags::empty(), &total_owed_key(), &mut buf);
+    U256::from_le_bytes::<32>(buf)
+}
+
+fn set_total_owed(amount: U256) {
+    // `set_storage_or_clear` reclaims the slot's storage deposit once the tally
+    // hits zero (the fully-refunded steady state), mirroring `set_deposit`.
+    api::set_storage_or_clear(
+        StorageFlags::empty(),
+        &total_owed_key(),
+        &amount.to_le_bytes::<32>(),
+    );
 }
 
 fn refund(addr: &Address) -> Result<U256, ()> {
     let balance = get_deposit(addr);
     set_deposit(addr, U256::ZERO);
+    // On a failed transfer below the call reverts, unwinding this write too — so
+    // the aggregate tracks the per-depositor tallies exactly, in lockstep.
+    set_total_owed(get_total_owed().saturating_sub(balance));
 
     let res = api::call(
         CallFlags::empty(),
@@ -426,6 +552,32 @@ fn revert_insufficient_deposit() -> ! {
     let error = Contract::InsufficientDeposit {};
     let encoded_error = <Contract::InsufficientDeposit as SolError>::abi_encode(&error);
     api::return_value(ReturnFlags::REVERT, &encoded_error);
+}
+
+/// Revert with the `NotOwner` Solidity error.
+#[inline]
+fn revert_not_owner() -> ! {
+    let error = Contract::NotOwner {};
+    let encoded_error = <Contract::NotOwner as SolError>::abi_encode(&error);
+    api::return_value(ReturnFlags::REVERT, &encoded_error);
+}
+
+/// Revert with the `OutstandingDeposits` Solidity error.
+#[inline]
+fn revert_outstanding_deposits() -> ! {
+    let error = Contract::OutstandingDeposits {};
+    let encoded_error = <Contract::OutstandingDeposits as SolError>::abi_encode(&error);
+    api::return_value(ReturnFlags::REVERT, &encoded_error);
+}
+
+/// The deployer recorded in immutable data by `deploy`. Only valid to read
+/// outside the constructor (and only because `deploy` always sets it).
+#[inline]
+fn get_deployer() -> Address {
+    let mut buf = [0u8; 20];
+    let mut out: &mut [u8] = &mut buf;
+    api::get_immutable_data(&mut out);
+    buf.into()
 }
 
 /// Get the caller's address
