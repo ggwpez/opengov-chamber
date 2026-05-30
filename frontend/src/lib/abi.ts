@@ -75,6 +75,13 @@ export const contractAbi = [
   },
   {
     type: 'function',
+    name: 'deployer',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'propose',
     stateMutability: 'nonpayable',
     inputs: [
@@ -118,6 +125,13 @@ export const contractAbi = [
   {
     type: 'function',
     name: 'refund',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'destroy',
     stateMutability: 'nonpayable',
     inputs: [],
     outputs: [],
@@ -167,6 +181,7 @@ export const contractAbi = [
   { type: 'error', name: 'InsufficientDeposit', inputs: [] },
   { type: 'error', name: 'ProposalNotFound', inputs: [] },
   { type: 'error', name: 'NotOwner', inputs: [] },
+  { type: 'error', name: 'OutstandingDeposits', inputs: [] },
 ] as const;
 
 /**

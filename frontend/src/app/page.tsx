@@ -1,4 +1,5 @@
 import { ConnectButton } from '@/components/ConnectButton';
+import { DestroyButton } from '@/components/DestroyButton';
 import { ProposeForm } from '@/components/ProposeForm';
 import { ProposalList } from '@/components/ProposalList';
 import { CONTRACT_ADDRESS, CONTRACT_CONFIGURED } from '@/lib/contract';
@@ -59,7 +60,10 @@ export default function Home() {
         <a href={REPO_URL} target="_blank" rel="noreferrer" className="sitefoot-link">
           Source on GitHub{COMMIT_SHA ? ` · ${COMMIT_SHA}` : ''}
         </a>
-        {builtAt ? <span className="sitefoot-meta">Deployed {builtAt}</span> : null}
+        <span className="sitefoot-right">
+          {builtAt ? <span className="sitefoot-meta">Deployed {builtAt}</span> : null}
+          <DestroyButton />
+        </span>
       </footer>
     </main>
   );

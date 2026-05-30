@@ -1290,6 +1290,40 @@ fn refund_reverts_and_preserves_tally_when_contract_is_short() {
 //     since `terminate` sweeps the *whole* balance to one beneficiary and would
 //     otherwise strand other depositors' refunds.
 
+/// The `deployer` getter returns the account that constructed the contract —
+/// exactly the account `destroy` gates on. The frontend uses it to decide
+/// whether to surface the owner-only destroy control.
+///
+/// Deliberately called by BOB, *not* the deployer: the returned address must be
+/// ALICE (the constructor caller, read from immutable data), never BOB (the
+/// caller of this getter). Calling as the deployer would let a `get_caller()`
+/// bug masquerade as correct, since caller and deployer would coincide.
+#[test]
+fn deployer_getter_returns_constructor_caller() {
+    new_test_ext().execute_with(|| {
+        fund(&BOB, ENDOWMENT);
+        let (addr, _) = setup_with_proposal(); // deployed by ALICE
+
+        let result = BareCallBuilder::<Test>::bare_call(RuntimeOrigin::signed(BOB), addr)
+            .data(Contract::deployerCall {}.abi_encode())
+            .transaction_limits(limits())
+            .build_and_unwrap_result();
+        assert_eq!(result.flags, ReturnFlags::empty());
+
+        let deployer = <Address as SolValue>::abi_decode_validate(&result.data).unwrap();
+        assert_eq!(
+            deployer,
+            Address::from(ALICE_ADDR.0),
+            "deployer() must return the constructor caller (ALICE), not the getter's caller (BOB)",
+        );
+        assert_ne!(
+            deployer,
+            Address::from(BOB_ADDR.0),
+            "deployer() must not return the calling account",
+        );
+    });
+}
+
 /// The happy path: the deployer destroys a contract that owes nothing. The call
 /// succeeds, the contract's balance is swept to the deployer, and the contract
 /// ceases to exist (a follow-up call no longer executes).

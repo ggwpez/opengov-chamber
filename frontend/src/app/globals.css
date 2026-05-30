@@ -804,3 +804,27 @@ button.addr-pill:hover {
 .sitefoot-meta {
   letter-spacing: 0.02em;
 }
+/* Right cluster of the footer: deploy timestamp + the owner-only destroy
+   control, kept on one line and pushed against the right edge. */
+.sitefoot-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.sitefoot-destroy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sitefoot-destroy-err {
+  color: var(--danger);
+  letter-spacing: 0.02em;
+}
+
+/* Compact button for tight chrome like the footer. */
+.btn-xs {
+  font-size: 11px;
+  padding: 4px 10px;
+}

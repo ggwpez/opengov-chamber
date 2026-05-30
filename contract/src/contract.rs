@@ -204,6 +204,13 @@ pub extern "C" fn call() {
             api::return_value(ReturnFlags::empty(), &[]);
         }
 
+        Contract::deployerCall::SELECTOR => {
+            // The deployer ("owner") recorded at construction. A plain getter so
+            // off-chain callers (the frontend) can tell whether the connected
+            // account is the one `destroy` will accept.
+            api::return_value(ReturnFlags::empty(), &get_deployer().abi_encode());
+        }
+
         Contract::destroyCall::SELECTOR => {
             // Only the original deployer may tear the contract down.
             let deployer = get_deployer();

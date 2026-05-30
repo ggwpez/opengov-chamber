@@ -69,6 +69,9 @@ interface Contract {
     function proposal(bytes32 proposalHash) external view returns (Proposal memory);
     // Total funds the contract still owes `depositor`, accumulated across their `finalize` calls.
     function deposits(address depositor) external view returns (uint256);
+    // The original deployer ("owner") — the only account `destroy` accepts. Recorded
+    // in immutable data at construction.
+    function deployer() external view returns (address);
 
     function propose(bytes32 callHash, uint32 callLen, DispatchTime memory enactment, Track track, address[] memory approvers, uint256 minApprovers) external;
     function approve(bytes32 proposalHash) external;
