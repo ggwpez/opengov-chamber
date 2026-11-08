@@ -85,9 +85,9 @@ pointing at a different contract or RPC.
 ### Deploy to the server (chamber.tasty.limo)
 
 `just frontend-deploy` ships the build to the project server over ssh/rsync. The server runs
-Caddy with a multi-file `import sites/*.caddy` layout; this app is one site,
-`deploy/chamber.caddy` (installed to `/etc/caddy/sites/chamber.caddy`), serving
-`/srv/chamber/out` as static files with auto-TLS.
+Caddy as Docker container `caddy` with a multi-file `import sites/*.caddy` layout; this app is
+one site, `deploy/chamber.caddy` (installed to `/etc/caddy/sites/chamber.caddy`), serving
+`/srv/chamber/out` (mounted read-only into the container) as static files with auto-TLS.
 
 ```bash
 just frontend-env 0x… https://eth-rpc.polkadot.io/   # bake the TARGET network's config

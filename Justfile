@@ -242,5 +242,5 @@ frontend-deploy host="server": frontend-build
     rsync -az -e ssh frontend/deploy/chamber.caddy {{host}}:/tmp/chamber.caddy
     ssh {{host}} 'sudo install -m644 /tmp/chamber.caddy /etc/caddy/sites/chamber.caddy && rm -f /tmp/chamber.caddy'
     echo "▸ validating + reloading caddy"
-    ssh {{host}} 'sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy'
+    ssh {{host}} 'sudo docker exec caddy caddy validate --config /etc/caddy/Caddyfile && sudo docker exec caddy caddy reload --config /etc/caddy/Caddyfile'
     echo "✔ deployed — https://chamber.tasty.limo/"
